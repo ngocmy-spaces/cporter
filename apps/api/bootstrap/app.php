@@ -13,8 +13,13 @@ return Application::configure(basePath: dirname(__DIR__))
         apiPrefix: 'api',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // Enable Sanctum stateful (cookie) auth for the same-origin admin SPA.
-        $middleware->statefulApi();
+        // CI-facing API-key auth + scope enforcement (docs/SPEC.md §12).
+        // Admin auth is a same-origin session (web guard) — those routes opt into the
+        // `web` middleware group explicitly in routes/api.php.
+        $middleware->alias([
+            'apikey' => \App\Http\Middleware\AuthenticateApiKey::class,
+            'scope' => \App\Http\Middleware\EnsureApiScope::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //
