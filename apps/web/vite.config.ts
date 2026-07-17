@@ -1,12 +1,12 @@
 import { defineConfig } from 'vite';
 import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
 
+// Styling is Mantine (+ PostCSS via postcss.config.cjs), no Tailwind.
 // Dev: proxy API calls to the Laravel backend (php artisan serve on :8000).
 // Prod: the built SPA is copied into apps/api/public and served by Laravel.
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },

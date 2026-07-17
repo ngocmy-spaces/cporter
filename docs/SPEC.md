@@ -434,8 +434,9 @@ FE gọi cùng API `/api/v1` (dùng session hoặc token admin). Realtime: **pol
 | Auth API | **Laravel Sanctum** | Token hashed, scopes, đơn giản. |
 | Queue | **database driver** + cron worker | Shared hosting thường không có Redis. |
 | DB | **MySQL (cPanel)** | Sẵn có trên cPanel. |
-| FE | **React 18 + Vite + TypeScript** | Bạn đã chọn React; Vite build nhanh, ra static. |
-| FE state/data | React Query + React Router + Tailwind | Chuẩn phổ biến, dễ maintain. |
+| FE | **React 19 + Vite + TypeScript** | Bạn đã chọn React; Vite build nhanh, ra static. |
+| FE UI kit | **Mantine v9** (core + hooks) + `@tabler/icons-react` + PostCSS preset | UI kit duy nhất — **không Tailwind**. Docs khai thác qua `llms.txt` (xem [docs/FRONTEND.md](FRONTEND.md) + skill `mantine-ui`). |
+| FE state/data | React Query 5 + React Router 7 | Chuẩn phổ biến, dễ maintain. |
 | Artifact | **ZIP** (`ZipArchive`) | Đã test runtime OK (§2.1). Không dùng tar.gz/PharData. |
 | Command exec | **cron-worker** (artisan `cporter:run-jobs` chạy qua cron) | exec/proc_open không dùng được ở web PHP (§9). |
 | SSH (optional) | phpseclib | Driver `ssh` — chỉ khi host bật SSH (không xác nhận trên host hiện tại). |

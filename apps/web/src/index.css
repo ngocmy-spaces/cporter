@@ -1,17 +1,7 @@
-@import 'tailwindcss';
-
-:root {
-  color-scheme: light dark;
-}
-
+/* Mantine's styles.css (imported in main.tsx before this file) provides the CSS reset.
+   Keep this file for app-level globals only. */
 html,
 body,
 #root {
   height: 100%;
-}
-
-body {
-  margin: 0;
-  font-family:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }

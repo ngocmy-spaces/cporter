@@ -1,52 +1,103 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import type { ComponentType } from 'react';
+import {
+  ActionIcon,
+  AppShell,
+  Badge,
+  Group,
+  NavLink,
+  Text,
+  useComputedColorScheme,
+  useMantineColorScheme,
+} from '@mantine/core';
+import { Link, Outlet, useLocation } from 'react-router-dom';
+import {
+  IconFileText,
+  IconFolders,
+  IconKey,
+  IconLayoutDashboard,
+  IconMoon,
+  IconRocket,
+  IconSettings,
+  IconSun,
+  IconUsers,
+  IconVersions,
+} from '@tabler/icons-react';
 
-type NavItem = { to: string; label: string; end?: boolean };
+type NavItem = {
+  to: string;
+  label: string;
+  end?: boolean;
+  icon: ComponentType<{ size?: number; stroke?: number }>;
+};
 
 const NAV: NavItem[] = [
-  { to: '/', label: 'Dashboard', end: true },
-  { to: '/projects', label: 'Projects' },
-  { to: '/deployments', label: 'Deployments' },
-  { to: '/releases', label: 'Releases' },
-  { to: '/logs', label: 'Logs' },
-  { to: '/settings', label: 'Settings' },
-  { to: '/users', label: 'Users' },
-  { to: '/api-keys', label: 'API Keys' },
+  { to: '/', label: 'Dashboard', end: true, icon: IconLayoutDashboard },
+  { to: '/projects', label: 'Projects', icon: IconFolders },
+  { to: '/deployments', label: 'Deployments', icon: IconRocket },
+  { to: '/releases', label: 'Releases', icon: IconVersions },
+  { to: '/logs', label: 'Logs', icon: IconFileText },
+  { to: '/settings', label: 'Settings', icon: IconSettings },
+  { to: '/users', label: 'Users', icon: IconUsers },
+  { to: '/api-keys', label: 'API Keys', icon: IconKey },
 ];
 
-export function Layout() {
+function ColorSchemeToggle() {
+  const { setColorScheme } = useMantineColorScheme();
+  const computed = useComputedColorScheme('light', { getInitialValueInEffect: true });
   return (
-    <div className="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <aside className="flex w-56 flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <div className="px-5 py-4 text-lg font-semibold tracking-tight">
-          c<span className="text-indigo-500">Porter</span>
-        </div>
-        <nav className="flex-1 space-y-1 px-3 py-2">
-          {NAV.map((item) => (
+    <ActionIcon
+      variant="default"
+      size="lg"
+      aria-label="Toggle color scheme"
+      onClick={() => setColorScheme(computed === 'dark' ? 'light' : 'dark')}
+    >
+      {computed === 'dark' ? <IconSun size={18} stroke={1.5} /> : <IconMoon size={18} stroke={1.5} />}
+    </ActionIcon>
+  );
+}
+
+export function Layout() {
+  const { pathname } = useLocation();
+  const isActive = (item: NavItem) => (item.end ? pathname === item.to : pathname.startsWith(item.to));
+
+  return (
+    <AppShell header={{ height: 56 }} navbar={{ width: 240, breakpoint: 'sm' }} padding="md">
+      <AppShell.Header>
+        <Group h="100%" px="md" justify="space-between">
+          <Text fw={700} size="lg">
+            c
+            <Text span inherit c="indigo.5">
+              Porter
+            </Text>
+          </Text>
+          <Group gap="sm">
+            <Badge variant="light" color="gray">
+              v0.1.0 · Phase 0
+            </Badge>
+            <ColorSchemeToggle />
+          </Group>
+        </Group>
+      </AppShell.Header>
+
+      <AppShell.Navbar p="xs">
+        {NAV.map((item) => {
+          const Icon = item.icon;
+          return (
             <NavLink
               key={item.to}
+              component={Link}
               to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                [
-                  'block rounded-md px-3 py-2 text-sm font-medium transition',
-                  isActive
-                    ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300'
-                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800',
-                ].join(' ')
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="px-5 py-3 text-xs text-slate-400">v0.1.0 · Phase 0</div>
-      </aside>
+              label={item.label}
+              leftSection={<Icon size={18} stroke={1.5} />}
+              active={isActive(item)}
+            />
+          );
+        })}
+      </AppShell.Navbar>
 
-      <main className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-6xl px-8 py-8">
-          <Outlet />
-        </div>
-      </main>
-    </div>
+      <AppShell.Main>
+        <Outlet />
+      </AppShell.Main>
+    </AppShell>
   );
 }
