@@ -1,0 +1,21 @@
+{
+  "name": "cporter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "cPorter — self-hosted deploy orchestrator for cPanel (monorepo: apps/api Laravel + apps/web React)",
+  "packageManager": "pnpm@11.12.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @cporter/web dev",
+    "dev:web": "pnpm --filter @cporter/web dev",
+    "build:web": "pnpm --filter @cporter/web build",
+    "lint:web": "pnpm --filter @cporter/web lint",
+    "typecheck:web": "pnpm --filter @cporter/web typecheck",
+    "build:artifact": "node build/build-artifact.mjs"
+  },
+  "devDependencies": {
+    "archiver": "^7.0.1"
+  }
+}

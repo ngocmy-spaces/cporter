@@ -1,0 +1,28 @@
+# ── Node / pnpm ──────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+apps/web/dist/
+
+# ── PHP / Laravel (apps/api) ─────────────────────────────────
+apps/api/vendor/
+apps/api/public/build/
+apps/api/public/hot
+apps/api/public/storage
+apps/api/.phpunit.result.cache
+apps/api/.phpunit.cache/
+
+# ── Build output / artifacts ─────────────────────────────────
+build/out/
+dist/
+*.zip
+
+# ── Env / secrets (never commit real env) ────────────────────
+.env
+.env.*
+!.env.example
+
+# ── IDE / OS ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+*.log

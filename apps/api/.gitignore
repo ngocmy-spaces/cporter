@@ -1,0 +1,21 @@
+/vendor
+/node_modules
+.env
+.env.backup
+.env.production
+.phpunit.result.cache
+.phpunit.cache
+/storage/*.key
+auth.json
+
+# SPA build output copied in during artifact build (docs/SPEC.md §14)
+/public/assets
+/public/index.html
+/public/storage
+/public/build
+/public/hot
+
+/.idea
+/.vscode
+/.fleet
+/.zed
