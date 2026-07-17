@@ -34,9 +34,12 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
-            'options' => extension_loaded('pdo_mysql') ? array_filter([
-                PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
-            ]) : [],
+            // Only reference PDO::MYSQL_ATTR_SSL_CA when an SSL CA is actually configured.
+            // (That constant is deprecated in PHP 8.5+ in favor of Pdo\Mysql::ATTR_SSL_CA, which
+            // doesn't exist on the cPanel target PHP 8.3 — this avoids the notice on both.)
+            'options' => extension_loaded('pdo_mysql') && env('MYSQL_ATTR_SSL_CA')
+                ? [PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA')]
+                : [],
         ],
 
         'mariadb' => [
