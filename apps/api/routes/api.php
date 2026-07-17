@@ -28,6 +28,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/auth/user', [AuthController::class, 'user']);
 
             Route::get('/system/capabilities', [SystemController::class, 'capabilities']);
+            Route::post('/system/capabilities/refresh', [SystemController::class, 'refreshCapabilities']);
 
             Route::get('/api-keys', [ApiKeyController::class, 'index']);
             Route::post('/api-keys', [ApiKeyController::class, 'store']);
