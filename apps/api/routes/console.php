@@ -9,9 +9,15 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 /*
-| Scheduler (see docs/SPEC.md §10). A single cPanel cron hits `php artisan schedule:run`
-| every minute; that shell context runs the cron-worker that executes queued shell jobs
-| (target-app artisan migrate/cache, queue worker, prune, timeout cleanup).
+| Scheduler (docs/SPEC.md §10). ONE cPanel cron drives everything:
+|   * * * * * cd /home/<user>/deploy.domain/current && php artisan schedule:run >> /dev/null 2>&1
+| That shell context lets the cron-worker run target-app hooks that web PHP cannot.
 */
-// Schedule::command('cporter:run-jobs')->everyMinute()->withoutOverlapping();
-// Schedule::command('cporter:prune-releases')->hourly();
+// Finalize Laravel deploys (run hooks → activate → health) — the cron shell context.
+Schedule::command('cporter:run-jobs')->everyMinute()->withoutOverlapping();
+
+// Process staging jobs (artifact extract etc.) enqueued by the Deploy API.
+Schedule::command('queue:work --stop-when-empty --max-time=50')->everyMinute()->withoutOverlapping();
+
+// Fail timed-out deployments and release stale locks.
+Schedule::command('cporter:housekeep')->everyFiveMinutes()->withoutOverlapping();

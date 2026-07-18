@@ -54,6 +54,18 @@ php artisan serve            # http://localhost:8000
 pnpm build:artifact          # → build/out/cporter-<version>.zip + prints sha256
 ```
 
+## cPanel cron (required for Laravel deploys + housekeeping)
+
+Web PHP can't run shell commands, so a single cPanel cron drives the cron-worker (runs
+Laravel hooks, processes staging jobs, cleans up). Add one cron entry:
+
+```cron
+* * * * * cd /home/<user>/deploy.domain/current && php artisan schedule:run >> /dev/null 2>&1
+```
+
+It fans out (see `apps/api/routes/console.php`) to `cporter:run-jobs` (finalize Laravel
+deploys), `queue:work` (artifact extraction), and `cporter:housekeep` (timeout/lock cleanup).
+
 ## Documentation
 
 - 📄 [Technical specification (SPEC)](docs/SPEC.md)
@@ -61,4 +73,4 @@ pnpm build:artifact          # → build/out/cporter-<version>.zip + prints sha2
 
 ## Status
 
-Phase 0 — scaffolding the monorepo skeleton. See [TASKS.md](TASKS.md).
+Phase 0 + Phase 1 complete; Phase 2 (Laravel via cron-worker) in progress. See [TASKS.md](TASKS.md).

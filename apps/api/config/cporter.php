@@ -21,6 +21,10 @@ return [
     // Deploy lock time-to-live (seconds) before a stale lock may be force-cleared.
     'lock_ttl' => (int) env('CPORTER_LOCK_TTL', 900),
 
+    // A deployment stuck in running/hooks_pending longer than this (seconds) is failed by
+    // the housekeeper and its project lock released.
+    'deployment_timeout' => (int) env('CPORTER_DEPLOYMENT_TIMEOUT', 1800),
+
     // Command execution driver: 'cron-worker' | 'manual' | 'ssh' | 'proc_open'.
     'command_driver' => env('CPORTER_COMMAND_DRIVER', 'cron-worker'),
 
