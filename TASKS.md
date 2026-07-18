@@ -50,11 +50,11 @@ and **spec reference**. Legend: ✅ done · 🔜 next · ⬜ todo · 🔒 blocke
 | **T2.1** | Job queue + cron-worker | ✅ | `cporter:run-jobs` finalize các deployment `hooks_pending` trong **cron shell context** (deploy giữ lock, cron nhả); steps ghi output/exit từng hook | §9.1, §10 |
 | **T2.2** | CommandRunner | ✅ | `CommandRunner` interface + `ProcessCommandRunner` (Symfony Process/proc_open, `isAvailable()`); shell-unavailable → step `run manually`. Verified chạy shell thật | §9.2 |
 | **T2.3** | Hooks in pipeline (Laravel) | ✅ | DeployEngine: project có hooks → stage → `hooks_pending`; finalize = pre-hooks→activate→post-hooks→health→prune, auto-rollback nếu fail sau activate. **64 tests pass** | §6, §9 |
-| **T2.4** | Chunked upload + idempotency | 🔒 T1.4 | `POST artifacts` / `PUT chunks/{n}` / `POST complete`; `Idempotency-Key` header | §6 |
+| **T2.4** | Chunked upload + idempotency | ✅ | `ArtifactUploadService` + `POST artifacts/uploads` / `PUT …/chunks/{n}` (raw body) / `POST …/complete` (assemble→verify→deploy); `Idempotency-Key` replay chia sẻ. **67 tests** | §6 |
 | **T2.5** | Scheduler tick + cron setup | ✅ | Schedule (1 cPanel cron → `schedule:run`): `cporter:run-jobs` + `queue:work` mỗi phút, `cporter:housekeep` mỗi 5' (fail deployment timeout + nhả lock treo). Cron line trong README. **65 tests** | §10 |
-| **T2.6** | Admin: hooks & capability | 🔒 T2.3,T0.6 | Show migration-pending, capability probe (Settings), manual hook retry | §13 |
+| **T2.6** | Admin: hooks & capability | ✅ | UI surface `hooks_pending` (badge + drawer poll tới terminal, hook steps + lỗi) + capabilities ở Settings (T1.9). Manual-retry hoãn (cron auto-finalize + housekeep) | §13 |
 
-**Milestone M2:** deploy Laravel end-to-end (including migrate) via cron-worker.
+**Milestone M2:** ✅ ĐẠT — deploy Laravel end-to-end (hooks migrate/cache/queue) qua cron-worker + scheduler + chunked upload. Phase 2 hoàn tất.
 
 ---
 

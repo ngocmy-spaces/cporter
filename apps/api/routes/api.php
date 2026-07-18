@@ -68,8 +68,15 @@ Route::prefix('v1')->group(function () {
             ]]);
         });
 
-        Route::middleware('scope:deploy')
-            ->post('/projects/{project}/deployments', [DeploymentController::class, 'store']);
+        Route::middleware('scope:deploy')->group(function () {
+            Route::post('/projects/{project}/deployments', [DeploymentController::class, 'store']);
+
+            // Chunked upload for artifacts larger than post_max_size (docs/SPEC.md §6).
+            Route::post('/projects/{project}/artifacts/uploads', [DeploymentController::class, 'uploadInit']);
+            Route::put('/projects/{project}/artifacts/uploads/{uploadId}/chunks/{index}', [DeploymentController::class, 'uploadChunk'])
+                ->whereNumber('index');
+            Route::post('/projects/{project}/artifacts/uploads/{uploadId}/complete', [DeploymentController::class, 'uploadComplete']);
+        });
 
         Route::middleware('scope:read')
             ->get('/projects/{project}/deployments/{deployment}', [DeploymentController::class, 'show']);

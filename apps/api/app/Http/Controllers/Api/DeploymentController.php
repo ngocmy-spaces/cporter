@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Adapters\Storage\StorageAdapter;
+use App\Domain\Deploy\ArtifactUploadService;
 use App\Enums\ArtifactStatus;
 use App\Enums\DeploymentStatus;
 use App\Enums\DeploymentTrigger;
@@ -21,24 +22,19 @@ use Illuminate\Http\Request;
  */
 class DeploymentController extends Controller
 {
-    public function __construct(private readonly StorageAdapter $storage) {}
+    public function __construct(
+        private readonly StorageAdapter $storage,
+        private readonly ArtifactUploadService $uploads,
+    ) {}
 
+    /** Single-request upload + deploy (artifacts ≤ post_max_size). */
     public function store(Request $request, Project $project): JsonResponse
     {
         if ($denied = $this->guardProjectScope($request, $project)) {
             return $denied;
         }
-
-        // Idempotency: replay returns the original deployment.
-        $idempotencyKey = $request->header('Idempotency-Key');
-        if ($idempotencyKey) {
-            $existing = Deployment::query()
-                ->where('project_id', $project->id)
-                ->where('idempotency_key', $idempotencyKey)
-                ->first();
-            if ($existing) {
-                return response()->json(['data' => $existing->load('release')], 200);
-            }
+        if ($replay = $this->idempotentReplay($request, $project)) {
+            return $replay;
         }
 
         $maxKb = (int) (config('cporter.artifact.max_bytes', 256 * 1024 * 1024) / 1024);
@@ -48,27 +44,87 @@ class DeploymentController extends Controller
             'version' => ['nullable', 'string', 'max:255'],
         ]);
 
-        // Persist the upload, then verify integrity before doing any heavy work.
         try {
             $storagePath = $this->storage->putArtifact($request->file('artifact')->getRealPath(), $project->slug);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        return $this->createDeployment($request, $project, $storagePath, $data['sha256'], $data['version'] ?? null);
+    }
+
+    // ── Chunked upload (docs/SPEC.md §6): init → chunks → complete ────────────────
+
+    public function uploadInit(Request $request, Project $project): JsonResponse
+    {
+        if ($denied = $this->guardProjectScope($request, $project)) {
+            return $denied;
+        }
+
+        return response()->json(['data' => ['upload_id' => $this->uploads->init()]], 201);
+    }
+
+    public function uploadChunk(Request $request, Project $project, string $uploadId, int $index): JsonResponse
+    {
+        if ($denied = $this->guardProjectScope($request, $project)) {
+            return $denied;
+        }
+
+        try {
+            // Chunk body is sent raw (application/octet-stream) to bypass post_max_size limits.
+            $this->uploads->putChunk($uploadId, $index, $request->getContent());
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => ['received' => $index]]);
+    }
+
+    public function uploadComplete(Request $request, Project $project, string $uploadId): JsonResponse
+    {
+        if ($denied = $this->guardProjectScope($request, $project)) {
+            return $denied;
+        }
+        if ($replay = $this->idempotentReplay($request, $project)) {
+            return $replay;
+        }
+
+        $data = $request->validate([
+            'sha256' => ['required', 'string', 'regex:/^[0-9a-fA-F]{64}$/'],
+            'version' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        try {
+            $assembled = $this->uploads->assemble($uploadId);
+            $storagePath = $this->storage->putArtifact($assembled, $project->slug);
+        } catch (\Throwable $e) {
+            $this->uploads->cleanup($uploadId);
+
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        $this->uploads->cleanup($uploadId);
+
+        return $this->createDeployment($request, $project, $storagePath, $data['sha256'], $data['version'] ?? null);
+    }
+
+    /** Verify integrity, create artifact/release/deployment records, dispatch the pipeline. */
+    private function createDeployment(Request $request, Project $project, string $storagePath, string $expectedSha, ?string $version): JsonResponse
+    {
         $actualSha = hash_file('sha256', $storagePath);
-        if ($actualSha === false || ! hash_equals(strtolower($data['sha256']), strtolower($actualSha))) {
+        if ($actualSha === false || ! hash_equals(strtolower($expectedSha), strtolower($actualSha))) {
             @unlink($storagePath);
 
             return response()->json([
                 'error' => 'Artifact hash mismatch.',
-                'expected' => $data['sha256'],
+                'expected' => $expectedSha,
                 'actual' => $actualSha ?: null,
             ], 422);
         }
 
         $artifact = Artifact::create([
             'project_id' => $project->id,
-            'filename' => $request->file('artifact')->getClientOriginalName(),
+            'filename' => basename($storagePath),
             'size' => filesize($storagePath) ?: 0,
             'sha256' => $actualSha,
             'storage_path' => $storagePath,
@@ -80,7 +136,7 @@ class DeploymentController extends Controller
         $release = Release::create([
             'project_id' => $project->id,
             'artifact_id' => $artifact->id,
-            'version' => $data['version'] ?? $releaseId,
+            'version' => $version ?? $releaseId,
             'path' => rtrim($project->base_path, '/').'/releases/'.$releaseId,
             'state' => ReleaseState::Pending,
         ]);
@@ -92,12 +148,27 @@ class DeploymentController extends Controller
             'trigger' => DeploymentTrigger::Api,
             'status' => DeploymentStatus::Queued,
             'actor' => $apiKey?->name,
-            'idempotency_key' => $idempotencyKey,
+            'idempotency_key' => $request->header('Idempotency-Key'),
         ]);
 
         DeployProjectJob::dispatch($deployment);
 
         return response()->json(['data' => $deployment->fresh()->load('release')], 202);
+    }
+
+    private function idempotentReplay(Request $request, Project $project): ?JsonResponse
+    {
+        $key = $request->header('Idempotency-Key');
+        if (! $key) {
+            return null;
+        }
+
+        $existing = Deployment::query()
+            ->where('project_id', $project->id)
+            ->where('idempotency_key', $key)
+            ->first();
+
+        return $existing ? response()->json(['data' => $existing->load('release')], 200) : null;
     }
 
     public function show(Request $request, Project $project, Deployment $deployment): JsonResponse
