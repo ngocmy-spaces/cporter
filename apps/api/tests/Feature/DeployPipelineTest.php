@@ -105,3 +105,17 @@ it('polls deployment status via GET', function () {
         ->assertOk()
         ->assertJsonPath('data.status', 'success');
 });
+
+it('fails the deploy when the project is already locked', function () {
+    File::put($this->base.'/deploy.lock', 'held-by-another'); // fresh lock held by someone else
+    $zip = buildZip(['index.html' => 'x']);
+
+    $created = $this->withToken($this->token)->post('/api/v1/projects/demo/deployments', [
+        'artifact' => upload($zip),
+        'sha256' => hash_file('sha256', $zip),
+    ])->assertStatus(202)->json('data');
+
+    expect($created['status'])->toBe('failed')
+        ->and(collect($created['steps'])->firstWhere('name', 'lock')['status'])->toBe('failed')
+        ->and(file_exists($this->base.'/current'))->toBeFalse();
+});
