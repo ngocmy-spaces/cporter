@@ -112,6 +112,30 @@ class DeploymentController extends Controller
         return response()->json(['data' => $deployment->load('release')]);
     }
 
+    // ── Admin (session) read endpoints ───────────────────────────────────────────
+
+    /** Recent deployments across all projects (dashboard / Deployments page). */
+    public function recent(): JsonResponse
+    {
+        return response()->json([
+            'data' => Deployment::query()->with(['project', 'release'])->latest()->limit(50)->get(),
+        ]);
+    }
+
+    /** Deployments for one project. */
+    public function index(Project $project): JsonResponse
+    {
+        return response()->json([
+            'data' => $project->deployments()->with('release')->latest()->limit(100)->get(),
+        ]);
+    }
+
+    /** A single deployment (global path, admin) — used for step polling in the UI. */
+    public function detail(Deployment $deployment): JsonResponse
+    {
+        return response()->json(['data' => $deployment->load(['project', 'release'])]);
+    }
+
     private function guardProjectScope(Request $request, Project $project): ?JsonResponse
     {
         $apiKey = $request->attributes->get('api_key');

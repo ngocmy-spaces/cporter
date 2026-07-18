@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\ApiKeyController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DeploymentController;
 use App\Http\Controllers\Api\ProjectController;
+use App\Http\Controllers\Api\ReleaseController;
 use App\Http\Controllers\Api\RollbackController;
 use App\Http\Controllers\Api\SystemController;
 use Illuminate\Http\Request;
@@ -40,6 +41,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/projects', [ProjectController::class, 'index']);
             Route::post('/projects', [ProjectController::class, 'store']);
             Route::get('/projects/{project}', [ProjectController::class, 'show']);
+            Route::get('/projects/{project}/deployments', [DeploymentController::class, 'index']);
+            Route::get('/projects/{project}/releases', [ReleaseController::class, 'index']);
+
+            Route::get('/deployments', [DeploymentController::class, 'recent']);
+            Route::get('/deployments/{deployment}', [DeploymentController::class, 'detail']);
+
+            Route::post('/releases/{release}/activate', [ReleaseController::class, 'activate']);
         });
     });
 

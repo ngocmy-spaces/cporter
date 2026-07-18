@@ -35,7 +35,7 @@ and **spec reference**. Legend: ✅ done · 🔜 next · ⬜ todo · 🔒 blocke
 | **T1.5** | Deploy Engine (static/wp/php pipeline) | ✅ | `DeployEngine` + `DeployProjectJob` (queue; sync dev/test, async cron prod): lock→extract→link_shared→validate→activate→prune→success, recording `Deployment.steps[]` at each step. **49 tests pass** | §6 |
 | **T1.6** | Health check + auto-rollback | ✅ | `HealthChecker` (Http/cURL, retry until timeout) after activate; on fail → `auto_rollback` to previous release, deployment=`rolled_back`. Shares `StepRunner` | §6, §8 |
 | **T1.7** | Rollback engine + endpoint | ✅ | `RollbackEngine` (previous/specified release, code-only) + `POST /projects/{slug}/rollback` (apikey+scope:rollback). **54 tests pass** | §8 |
-| **T1.8** | Read endpoints | 🔒 T0.5 | `GET deployments/{id}`, `/logs`, `/releases`, `/projects` | §7 |
+| **T1.8** | Read endpoints | ✅ | Admin (session): `GET /deployments` (recent), `GET /deployments/{id}`, `GET /projects/{p}/deployments`, `GET /projects/{p}/releases`, `POST /releases/{id}/activate` (rollback từ UI). Logs = `Deployment.steps`. **58 tests pass** | §7 |
 | **T1.9** | Admin UI (deploy core) | 🔒 T1.4,T1.8 | Projects CRUD; Deployments list + detail (poll steps/log); Releases (activate=rollback); Logs | §13 |
 | **T1.10** | Tests pipeline | 🔒 T1.5 | `FakeStorageAdapter`; e2e feature test deploy static + rollback + lock-conflict | §15 |
 
