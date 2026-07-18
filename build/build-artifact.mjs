@@ -14,7 +14,7 @@
  * so cPorter's ZipArchive::extractTo() can unpack it on cPanel.
  */
 import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync, cpSync, readFileSync } from 'node:fs';
+import { appendFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, rmSync, cpSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -74,3 +74,8 @@ const sha = await new Promise((resolvePromise, reject) => {
 console.log(`\n✔ Artifact: ${zipPath}`);
 console.log(`  version:  ${version}`);
 console.log(`  sha256:   ${sha}`);
+
+// Expose results to GitHub Actions (used by the deploy step).
+if (process.env.GITHUB_OUTPUT) {
+  appendFileSync(process.env.GITHUB_OUTPUT, `artifact=${zipPath}\nsha256=${sha}\nversion=${version}\n`);
+}
