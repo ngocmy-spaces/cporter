@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Adapters\Storage\CpanelFilesystemAdapter;
+use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Storage\PathJail;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
@@ -16,11 +18,13 @@ class AppServiceProvider extends ServiceProvider
         // The filesystem jail is derived from config and shared app-wide (docs/SPEC.md §11, §12).
         $this->app->singleton(PathJail::class, fn () => PathJail::fromConfig());
 
-        // Bind Core Engine contracts to concrete adapters here (see docs/SPEC.md §11, §9).
-        // $this->app->bind(
-        //     \App\Adapters\Storage\StorageAdapter::class,
-        //     \App\Adapters\Storage\CpanelFilesystemAdapter::class,
-        // );
+        // Storage abstraction → cPanel filesystem adapter (docs/SPEC.md §11).
+        $this->app->singleton(StorageAdapter::class, fn ($app) => new CpanelFilesystemAdapter(
+            $app->make(PathJail::class),
+            (int) config('cporter.artifact.max_files', 50000),
+            (int) config('cporter.artifact.max_bytes', 256 * 1024 * 1024),
+            (int) config('cporter.artifact.max_uncompressed_bytes', 1024 * 1024 * 1024),
+        ));
     }
 
     /**

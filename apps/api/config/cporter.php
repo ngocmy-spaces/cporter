@@ -31,6 +31,8 @@ return [
     'artifact' => [
         'max_bytes' => (int) env('CPORTER_ARTIFACT_MAX_BYTES', 256 * 1024 * 1024),
         'max_files' => (int) env('CPORTER_ARTIFACT_MAX_FILES', 50000),
+        // Zip-bomb guard: reject archives whose total uncompressed size exceeds this.
+        'max_uncompressed_bytes' => (int) env('CPORTER_ARTIFACT_MAX_UNCOMPRESSED_BYTES', 1024 * 1024 * 1024),
     ],
 
     // Health check defaults.
