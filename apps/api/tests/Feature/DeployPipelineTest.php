@@ -45,6 +45,7 @@ beforeEach(function () {
         'docroot_subpath' => null,
         'shared_paths' => [],
         'keep_releases' => 3,
+        'health_check_url' => null, // no HTTP in these pure-deploy tests
     ]);
 
     ['token' => $this->token] = app(ApiKeyService::class)->generate('ci', ['deploy', 'read'], $this->project->id);

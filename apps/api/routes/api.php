@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\ApiKeyController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DeploymentController;
 use App\Http\Controllers\Api\ProjectController;
+use App\Http\Controllers\Api\RollbackController;
 use App\Http\Controllers\Api\SystemController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -60,5 +61,8 @@ Route::prefix('v1')->group(function () {
 
         Route::middleware('scope:read')
             ->get('/projects/{project}/deployments/{deployment}', [DeploymentController::class, 'show']);
+
+        Route::middleware('scope:rollback')
+            ->post('/projects/{project}/rollback', [RollbackController::class, 'store']);
     });
 });
