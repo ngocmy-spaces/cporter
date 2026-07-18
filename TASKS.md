@@ -1,88 +1,88 @@
 # cPorter — Task Breakdown
 
-Chia nhỏ từ [docs/SPEC.md](docs/SPEC.md) theo phase. Mỗi task ghi rõ **deliverable**, **phụ thuộc**,
-và **tham chiếu spec**. Ký hiệu: ✅ done · 🔜 next · ⬜ chưa · 🔒 chờ phụ thuộc.
+Broken down from [docs/SPEC.md](docs/SPEC.md) by phase. Each task states its **deliverable**, **dependencies**,
+and **spec reference**. Legend: ✅ done · 🔜 next · ⬜ todo · 🔒 blocked.
 
-> Quyết định đã chốt: single-tenant · MySQL · artifact = ZIP · **không exec ở web PHP → cron-worker** ·
-> MVP hỗ trợ static/React SPA + Laravel + WordPress/PHP. Chi tiết: SPEC §17.1.
+> Decisions locked in: single-tenant · MySQL · artifact = ZIP · **no exec in web PHP → cron-worker** ·
+> MVP supports static/React SPA + Laravel + WordPress/PHP. Details: SPEC §17.1.
 
 ---
 
 ## Phase 0 — Foundation
 
-| ID | Task | Trạng thái | Deliverable / Ghi chú | Spec |
+| ID | Task | Status | Deliverable / Notes | Spec |
 |----|------|:----:|---|---|
 | **T0.1** | Monorepo scaffold | ✅ | `apps/{api,web}`, pnpm workspace, `.gitignore/.editorconfig`, `build/build-artifact.mjs`, README | §4.2 |
-| **T0.2** | Web SPA shell | ✅ | React 19 + Vite + TS + **Mantine v9** + Router + React Query; AppShell layout + 8 trang stub; **build + lint pass**. FE docs/skill/agent: [docs/FRONTEND.md](docs/FRONTEND.md) | §13 |
+| **T0.2** | Web SPA shell | ✅ | React 19 + Vite + TS + **Mantine v9** + Router + React Query; AppShell layout + 8 stub pages; **build + lint pass**. FE docs/skill/agent: [docs/FRONTEND.md](docs/FRONTEND.md) | §13 |
 | **T0.3** | API Laravel 12 skeleton | ✅ | Laravel 12/PHP 8.2, Sanctum, `/api/v1/health`, `Adapters/{Storage,Command}` interfaces, `cporter:run-jobs` stub, `config/cporter.php`; **tests + migrate pass** | §15 |
-| **T0.4** | CI self-deploy workflow | 🔜 | `.github/workflows/deploy.yml`: build web → composer install --no-dev → `pnpm build:artifact` → gọi Deploy API. Hoàn thiện khi có T1.4 | §14 |
-| **T0.5** | Domain model + migrations | ✅ | 6 migrations + Eloquent models (`projects`/`releases`/`artifacts`/`deployments`/`api_keys`/`audit_logs`) + 6 backed enums trong `app/Enums`; ProjectFactory. **migrate + 5 tests pass**. Models ở `app/Models`, `app/Domain` để dành cho engine | §5 |
+| **T0.4** | CI self-deploy workflow | 🔜 | `.github/workflows/deploy.yml`: build web → composer install --no-dev → `pnpm build:artifact` → call Deploy API. To be finalized once T1.4 lands | §14 |
+| **T0.5** | Domain model + migrations | ✅ | 6 migrations + Eloquent models (`projects`/`releases`/`artifacts`/`deployments`/`api_keys`/`audit_logs`) + 6 backed enums in `app/Enums`; ProjectFactory. **migrate + 5 tests pass**. Models in `app/Models`, `app/Domain` reserved for the engine | §5 |
 | **T0.6** | Auth + API keys + capability probe | ✅ | Admin auth = same-origin session (web guard): `/auth/login\|logout\|user`. API key `cpk_…` (prefix + sha256 hash) via `ApiKeyService` + middleware `apikey`/`scope:` + scopes(`read/deploy/rollback/admin`, admin=super) + `/whoami` + admin CRUD `/api-keys`. `GET /system/capabilities` (probe ext/functions/symlink/disk/limits). **16 tests pass** | §9.3, §12 |
-| **T0.7** | Settings + jail config | ✅ | `PathJail` (normalize + realpath symlink-resolve, chống traversal/symlink-escape/prefix-confusion, deny-all mặc định) bind singleton; `Setting` model + bảng (lưu probe); `/system/capabilities` persist + `/refresh`; boot-validate base paths. **27 tests pass** | §11, §12 |
+| **T0.7** | Settings + jail config | ✅ | `PathJail` (normalize + realpath symlink-resolve, guards against traversal/symlink-escape/prefix-confusion, deny-all by default) bound as singleton; `Setting` model + table (stores probe); `/system/capabilities` persist + `/refresh`; boot-validate base paths. **27 tests pass** | §11, §12 |
 
 ---
 
-## Phase 1 — MVP Deploy (static / WordPress / PHP thuần — KHÔNG cần shell)
+## Phase 1 — MVP Deploy (static / WordPress / plain PHP — NO shell required)
 
-> Mục tiêu: deploy trọn vẹn **đồng bộ trong web PHP** cho app không cần hook. Đây là lát cắt rủi ro thấp nhất.
+> Goal: fully deploy **synchronously within web PHP** for apps that need no hooks. This is the lowest-risk slice.
 
-| ID | Task | Trạng thái | Deliverable / Ghi chú | Spec |
+| ID | Task | Status | Deliverable / Notes | Spec |
 |----|------|:----:|---|---|
-| **T1.1** | Path jail + Zip-Slip util | ✅ | `PathJail` (T0.7) + Zip-Slip guard (per-entry qua inner PathJail trong `extractZip`) | §11, §12 |
-| **T1.2** | FS Adapter: artifact + extract | ✅ | `putArtifact` (move→storage, cap size, sanitize slug) + `extractZip` (ZipArchive, Zip-Slip + cap files/uncompressed) trong `CpanelFilesystemAdapter`; bind `StorageAdapter`. **36 tests pass** | §6, §11 |
-| **T1.3** | FS Adapter: release + swap + lock | ✅ | `activate` (symlink swap atomic + copy-swap fallback), `linkShared` (seed shared + symlink, persist qua release), `pruneReleases` (không xóa release active), `acquireLock/releaseLock` (O_EXCL + TTL steal), `currentTarget`. **41 tests pass** — `CpanelFilesystemAdapter` hoàn chỉnh | §6, §8, §11 |
-| **T1.4** | Deploy API: create + upload (single) | ✅ | `POST /projects/{slug}/deployments` (apikey+scope:deploy, upload ≤256MB, verify sha256, idempotency, `202`) + `GET …/deployments/{id}` (poll) + ProjectController (admin: create trong jail/list/show) | §6, §7 |
-| **T1.5** | Deploy Engine (pipeline static/wp/php) | ✅ | `DeployEngine` + `DeployProjectJob` (queue; sync dev/test, async cron prod): lock→extract→link_shared→validate→activate→prune→success, ghi `Deployment.steps[]` từng bước. **49 tests pass** | §6 |
-| **T1.6** | Health check + auto-rollback | ✅ | `HealthChecker` (Http/cURL, retry đến timeout) sau activate; fail → `auto_rollback` về release trước, deployment=`rolled_back`. `StepRunner` dùng chung | §6, §8 |
+| **T1.1** | Path jail + Zip-Slip util | ✅ | `PathJail` (T0.7) + Zip-Slip guard (per-entry via inner PathJail in `extractZip`) | §11, §12 |
+| **T1.2** | FS Adapter: artifact + extract | ✅ | `putArtifact` (move→storage, size cap, sanitize slug) + `extractZip` (ZipArchive, Zip-Slip + file/uncompressed caps) in `CpanelFilesystemAdapter`; bind `StorageAdapter`. **36 tests pass** | §6, §11 |
+| **T1.3** | FS Adapter: release + swap + lock | ✅ | `activate` (atomic symlink swap + copy-swap fallback), `linkShared` (seed shared + symlink, persisted per release), `pruneReleases` (does not delete active release), `acquireLock/releaseLock` (O_EXCL + TTL steal), `currentTarget`. **41 tests pass** — `CpanelFilesystemAdapter` complete | §6, §8, §11 |
+| **T1.4** | Deploy API: create + upload (single) | ✅ | `POST /projects/{slug}/deployments` (apikey+scope:deploy, upload ≤256MB, verify sha256, idempotency, `202`) + `GET …/deployments/{id}` (poll) + ProjectController (admin: create in jail/list/show) | §6, §7 |
+| **T1.5** | Deploy Engine (static/wp/php pipeline) | ✅ | `DeployEngine` + `DeployProjectJob` (queue; sync dev/test, async cron prod): lock→extract→link_shared→validate→activate→prune→success, recording `Deployment.steps[]` at each step. **49 tests pass** | §6 |
+| **T1.6** | Health check + auto-rollback | ✅ | `HealthChecker` (Http/cURL, retry until timeout) after activate; on fail → `auto_rollback` to previous release, deployment=`rolled_back`. Shares `StepRunner` | §6, §8 |
 | **T1.7** | Rollback engine + endpoint | ✅ | `RollbackEngine` (previous/specified release, code-only) + `POST /projects/{slug}/rollback` (apikey+scope:rollback). **54 tests pass** | §8 |
 | **T1.8** | Read endpoints | 🔒 T0.5 | `GET deployments/{id}`, `/logs`, `/releases`, `/projects` | §7 |
 | **T1.9** | Admin UI (deploy core) | 🔒 T1.4,T1.8 | Projects CRUD; Deployments list + detail (poll steps/log); Releases (activate=rollback); Logs | §13 |
-| **T1.10** | Tests pipeline | 🔒 T1.5 | `FakeStorageAdapter`; feature test e2e deploy static + rollback + lock-conflict | §15 |
+| **T1.10** | Tests pipeline | 🔒 T1.5 | `FakeStorageAdapter`; e2e feature test deploy static + rollback + lock-conflict | §15 |
 
-**Milestone M1:** ✅ ĐẠT — deploy + rollback site static qua API, atomic, health check + auto-rollback.
+**Milestone M1:** ✅ ACHIEVED — deploy + rollback static site via API, atomic, health check + auto-rollback.
 
 ---
 
 ## Phase 2 — Laravel target + hooks + chunked upload
 
-| ID | Task | Trạng thái | Deliverable / Ghi chú | Spec |
+| ID | Task | Status | Deliverable / Notes | Spec |
 |----|------|:----:|---|---|
-| **T2.1** | Job queue + cron-worker | 🔒 M1 | Bảng `jobs` (shell jobs), lệnh `cporter:run-jobs` thực thi trong **cron shell context**, ghi exit/output | §9.1, §10 |
-| **T2.2** | CommandRunner drivers | 🔒 T2.1 | `CronWorkerRunner` (chính), `ManualRunner` (fallback → `hooks_pending`); chọn theo `command_driver` | §9.2 |
-| **T2.3** | Hooks trong pipeline (Laravel) | 🔒 T2.2 | pre/post-activate enqueue (`migrate --force`, `config:cache`, `queue:restart`); status `hooks_pending` → success sau cron | §6, §9 |
-| **T2.4** | Chunked upload + idempotency | 🔒 T1.4 | `POST artifacts` / `PUT chunks/{n}` / `POST complete`; header `Idempotency-Key` | §6 |
-| **T2.5** | Scheduler tick + cron setup | 🔒 T2.1 | `schedule:run` mỗi phút; doc/script tạo cron cPanel (+ UAPI nếu có); dọn lock treo, timeout deployment | §10 |
-| **T2.6** | Admin: hooks & capability | 🔒 T2.3,T0.6 | Hiển thị migration-pending, capability probe (Settings), retry hook thủ công | §13 |
+| **T2.1** | Job queue + cron-worker | 🔒 M1 | `jobs` table (shell jobs), `cporter:run-jobs` command executing in **cron shell context**, recording exit/output | §9.1, §10 |
+| **T2.2** | CommandRunner drivers | 🔒 T2.1 | `CronWorkerRunner` (primary), `ManualRunner` (fallback → `hooks_pending`); selected by `command_driver` | §9.2 |
+| **T2.3** | Hooks in pipeline (Laravel) | 🔒 T2.2 | pre/post-activate enqueue (`migrate --force`, `config:cache`, `queue:restart`); status `hooks_pending` → success after cron | §6, §9 |
+| **T2.4** | Chunked upload + idempotency | 🔒 T1.4 | `POST artifacts` / `PUT chunks/{n}` / `POST complete`; `Idempotency-Key` header | §6 |
+| **T2.5** | Scheduler tick + cron setup | 🔒 T2.1 | `schedule:run` every minute; doc/script to create cPanel cron (+ UAPI if available); clean stale locks, deployment timeout | §10 |
+| **T2.6** | Admin: hooks & capability | 🔒 T2.3,T0.6 | Show migration-pending, capability probe (Settings), manual hook retry | §13 |
 
-**Milestone M2:** deploy Laravel end-to-end (kèm migrate) qua cron-worker.
+**Milestone M2:** deploy Laravel end-to-end (including migrate) via cron-worker.
 
 ---
 
 ## Phase 3 — Admin polish & Scheduler
 
-| ID | Task | Trạng thái | Deliverable | Spec |
+| ID | Task | Status | Deliverable | Spec |
 |----|------|:----:|---|---|
-| **T3.1** | Dashboard widgets | ⬜ | Deploy gần đây, success rate, cảnh báo (lock treo, migration pending) | §13 |
-| **T3.2** | Users & roles | ⬜ | CRUD user admin + role | §13 |
-| **T3.3** | API Keys/Tokens UI | ⬜ | Tạo/thu hồi token, gán scope + project, last_used | §12, §13 |
-| **T3.4** | Audit log UI | ⬜ | Filter theo project/status/time | §12 |
-| **T3.5** | Housekeeping | ⬜ | Prune release, timeout cleanup theo lịch | §10 |
+| **T3.1** | Dashboard widgets | ⬜ | Recent deploys, success rate, alerts (stale lock, migration pending) | §13 |
+| **T3.2** | Users & roles | ⬜ | Admin user CRUD + roles | §13 |
+| **T3.3** | API Keys/Tokens UI | ⬜ | Create/revoke token, assign scope + project, last_used | §12, §13 |
+| **T3.4** | Audit log UI | ⬜ | Filter by project/status/time | §12 |
+| **T3.5** | Housekeeping | ⬜ | Prune releases, timeout cleanup on a schedule | §10 |
 | **T3.6** | Webhooks | ⬜ | `POST /webhooks/{provider}` verify HMAC (GitHub/GitLab) | §7, §12 |
 
 ---
 
-## Phase 4 — Ecosystem (tương lai)
+## Phase 4 — Ecosystem (future)
 
 | ID | Task | Deliverable | Spec |
 |----|------|---|---|
-| **T4.1** | GitHub Action chính thức | Action publish lên marketplace | §18 |
-| **T4.2** | JS SDK + PHP SDK | Client thư viện gọi Deploy API | §18 |
+| **T4.1** | Official GitHub Action | Action published to the marketplace | §18 |
+| **T4.2** | JS SDK + PHP SDK | Client libraries calling the Deploy API | §18 |
 | **T4.3** | CLI | `cporter deploy …` | §18 |
-| **T4.4** | Plugin/Adapter API · multi-account · self-deploy | SshStorageAdapter, đa server, cPorter tự update | §14, §18 |
+| **T4.4** | Plugin/Adapter API · multi-account · self-deploy | SshStorageAdapter, multi-server, cPorter self-update | §14, §18 |
 
 ---
 
-## Thứ tự bắt đầu đề xuất
+## Suggested starting order
 
 ```
 T0.5 (domain model)  →  T0.6 (auth/api key)  →  T0.7 (settings/jail)
@@ -90,10 +90,10 @@ T0.5 (domain model)  →  T0.6 (auth/api key)  →  T0.7 (settings/jail)
                                                           └→ T1.4 → T1.5 → T1.6/T1.7 → T1.8 → T1.9 → T1.10  ⇒ M1
 ```
 
-**Task khởi động ngay:** **T0.5 — Domain model + migrations** (mở khóa gần như toàn bộ Phase 1) và
-song song **T0.6 — Auth + API key + capability probe**.
+**Task to start immediately:** **T0.5 — Domain model + migrations** (unlocks nearly all of Phase 1), and
+in parallel **T0.6 — Auth + API key + capability probe**.
 
 ---
 
-## Câu hỏi còn treo (không chặn T0.5/T0.6) — xem SPEC §17.2
-Kích thước artifact thực tế · phạm vi WordPress · health-check URL từng loại · cron interval · CI đầu tiên.
+## Open questions (do not block T0.5/T0.6) — see SPEC §17.2
+Real-world artifact size · WordPress scope · per-type health-check URL · cron interval · first CI run.

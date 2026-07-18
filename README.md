@@ -1,44 +1,44 @@
 # cPorter
 
-Self-hosted deploy orchestrator chạy trên **cPanel shared hosting**. Cài như một web app bình thường
-(monorepo **React + Laravel**, 1 folder / 1 domain), nhưng quản lý và deploy atomic (release + symlink,
-rollback tức thì) cho các domain khác cùng tài khoản cPanel — điều khiển qua HTTP API từ bất kỳ CI nào.
+Self-hosted deploy orchestrator that runs on **cPanel shared hosting**. Installed like a regular web app
+(monorepo **React + Laravel**, 1 folder / 1 domain), but manages and deploys atomically (release + symlink,
+instant rollback) for other domains under the same cPanel account — controlled over an HTTP API from any CI.
 
-## Cấu trúc monorepo
+## Monorepo structure
 
 ```
 cporter/
 ├── apps/
 │   ├── api/          # Laravel 12 — Deploy API + Core Engine + Admin API
 │   └── web/          # React + Vite + TS — Admin Panel SPA
-├── build/            # build-artifact.mjs → gộp FE+BE thành 1 file .zip deploy
-├── docs/SPEC.md      # Đặc tả kỹ thuật đầy đủ
-└── TASKS.md          # Chia task theo phase
+├── build/            # build-artifact.mjs → bundles FE+BE into a single deployable .zip
+├── docs/SPEC.md      # Full technical specification
+└── TASKS.md          # Task breakdown by phase
 ```
 
-Khi deploy: `apps/web` build ra static → copy vào `apps/api/public`; Laravel phục vụ `/api/v1/*` là JSON
-và fallback các route khác về SPA. Docroot cPanel trỏ vào `deploy.domain/current/public`.
+On deploy: `apps/web` builds to static → copied into `apps/api/public`; Laravel serves `/api/v1/*` as JSON
+and falls back other routes to the SPA. The cPanel docroot points to `deploy.domain/current/public`.
 
-## Yêu cầu môi trường dev
+## Dev environment requirements
 
-| Tool | Version | Ghi chú |
+| Tool | Version | Notes |
 |---|---|---|
-| Node | ≥ 20 (đang dùng 24) | cho `apps/web` |
+| Node | ≥ 20 (currently using 24) | for `apps/web` |
 | pnpm | ≥ 11 | package manager |
-| PHP | 8.2+ (target host: 8.3) | cho `apps/api` — **cần cài để chạy BE** |
-| Composer | 2.x | cài dependency Laravel |
-| MySQL | 5.7+/8 | DB của cPorter |
+| PHP | 8.2+ (target host: 8.3) | for `apps/api` — **required to run the BE** |
+| Composer | 2.x | install Laravel dependencies |
+| MySQL | 5.7+/8 | cPorter's DB |
 
-## Bắt đầu (dev)
+## Getting started (dev)
 
 ```bash
-# 1) Cài toàn bộ JS deps (root + apps/web) + build script
+# 1) Install all JS deps (root + apps/web) + build script
 pnpm install
 
-# 2) Chạy Admin SPA (Vite dev server, proxy /api → http://localhost:8000)
+# 2) Run the Admin SPA (Vite dev server, proxy /api → http://localhost:8000)
 pnpm dev:web
 
-# 3) Backend Laravel (khi đã có PHP + Composer)
+# 3) Laravel backend (once you have PHP + Composer)
 cd apps/api
 composer install
 cp .env.example .env
@@ -47,18 +47,18 @@ php artisan migrate
 php artisan serve            # http://localhost:8000
 ```
 
-## Build artifact deploy
+## Build deploy artifact
 
 ```bash
-# CI: composer install --no-dev trong apps/api trước, rồi:
-pnpm build:artifact          # → build/out/cporter-<version>.zip + in sha256
+# CI: run composer install --no-dev in apps/api first, then:
+pnpm build:artifact          # → build/out/cporter-<version>.zip + prints sha256
 ```
 
-## Tài liệu
+## Documentation
 
-- 📄 [Đặc tả kỹ thuật (SPEC)](docs/SPEC.md)
-- ✅ [Task breakdown theo phase](TASKS.md)
+- 📄 [Technical specification (SPEC)](docs/SPEC.md)
+- ✅ [Task breakdown by phase](TASKS.md)
 
-## Trạng thái
+## Status
 
-Phase 0 — dựng khung sườn monorepo. Xem [TASKS.md](TASKS.md).
+Phase 0 — scaffolding the monorepo skeleton. See [TASKS.md](TASKS.md).

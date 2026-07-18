@@ -1,92 +1,92 @@
-# cPorter — Đặc tả kỹ thuật (Technical Specification)
+# cPorter — Technical Specification
 
-> Trạng thái: **DRAFT v0.1** · Ngày: 2026-07-17 · Owner: dat.nguyen@siliconstack.com.au
+> Status: **DRAFT v0.1** · Date: 2026-07-17
 >
-> Tài liệu này mô tả kiến trúc, phạm vi và các quyết định kỹ thuật của cPorter.
-> Các mục đánh dấu **[GIẢ ĐỊNH]** cần được xác nhận trước khi chốt (xem §17 Open Questions).
+> This document describes the architecture, scope, and technical decisions of cPorter.
+> Items marked **[ASSUMPTION]** must be confirmed before finalization (see §17 Open Questions).
 
 ---
 
-## 1. Tổng quan
+## 1. Overview
 
-**cPorter** là một công cụ orchestration deploy **self-hosted**, chạy như một web app bình thường
-trên **cPanel shared hosting**, nhưng có khả năng **quản lý và deploy cho các thư mục domain khác**
-nằm cùng tài khoản cPanel đó.
+**cPorter** is a **self-hosted** deploy orchestration tool that runs as an ordinary web app
+on **cPanel shared hosting**, but is capable of **managing and deploying to the folders of other domains**
+that reside under the same cPanel account.
 
-Mô hình vận hành:
+Operating model:
 
-- Người dùng đã tạo sẵn các addon domain / subdomain trên cPanel, mỗi domain trỏ document root vào
-  một thư mục dưới `/home/<user>/` (ví dụ `learn.domain`, `shop.domain`, `api.domain`).
-- cPorter tự cài vào một domain riêng (`deploy.domain`) và trở thành "control plane" đứng ra:
-  nhận artifact từ CI, giải nén, quản lý release, đổi symlink `current` một cách atomic, health check,
-  rollback — cho **tất cả** các project domain còn lại.
-- CI (GitHub Actions / GitLab CI / Jenkins / bất kỳ) chỉ cần **build artifact và gọi HTTP API** của cPorter.
+- The user has already created addon domains / subdomains on cPanel, each pointing its document root to
+  a folder under `/home/<user>/` (e.g. `learn.domain`, `shop.domain`, `api.domain`).
+- cPorter installs itself into a dedicated domain (`deploy.domain`) and becomes the "control plane" responsible for:
+  receiving artifacts from CI, extracting them, managing releases, atomically swapping the `current` symlink, health checks,
+  rollback — for **all** the remaining project domains.
+- CI (GitHub Actions / GitLab CI / Jenkins / anything) only needs to **build an artifact and call cPorter's HTTP API**.
 
-### 1.1 Mục tiêu (Goals)
+### 1.1 Goals
 
-1. Deploy **atomic, zero-downtime** trên cPanel mà **không cần root, không Docker, không systemd**.
-2. Release có phiên bản, **rollback tức thì** (đổi symlink).
-3. API-first: mọi CI đều tích hợp được qua HTTP + token.
-4. Admin panel để quan sát & thao tác thủ công (dashboard, logs, rollback…).
-5. Bản thân cPorter là **monorepo React (FE) + Laravel (BE)**, deploy chung 1 folder / 1 domain.
+1. **Atomic, zero-downtime** deploys on cPanel **without root, without Docker, without systemd**.
+2. Versioned releases with **instant rollback** (symlink swap).
+3. API-first: any CI can integrate via HTTP + token.
+4. Admin panel for observation & manual operations (dashboard, logs, rollback…).
+5. cPorter itself is a **React (FE) + Laravel (BE) monorepo**, deployed as a single folder / single domain.
 
-### 1.2 Ngoài phạm vi (Non-goals — bản đầu)
+### 1.2 Non-goals (initial release)
 
-- Không tự cấp domain / DNS / SSL (người dùng làm trên cPanel).
-- Không phải CI runner (không build code — build là việc của CI).
-- Không quản lý nhiều tài khoản cPanel / nhiều server trong bản MVP (xem Roadmap).
-- Không thay thế WHM/cPanel API cho quản trị hosting cấp cao.
+- Does not provision domains / DNS / SSL (the user does this on cPanel).
+- Not a CI runner (does not build code — building is CI's job).
+- Does not manage multiple cPanel accounts / multiple servers in the MVP (see Roadmap).
+- Does not replace the WHM/cPanel API for high-level hosting administration.
 
 ---
 
-## 2. Bối cảnh & Ràng buộc cPanel (QUAN TRỌNG NHẤT)
+## 2. cPanel Context & Constraints (MOST IMPORTANT)
 
-Đây là phần quyết định thiết kế. cPanel shared hosting khác hẳn VPS/root server.
+This section drives the design. cPanel shared hosting is very different from a VPS/root server.
 
-| Ràng buộc | Ảnh hưởng thiết kế |
+| Constraint | Design impact |
 |---|---|
-| PHP chạy **dưới quyền chính user cPanel** (suEXEC / PHP-FPM per-user) | ✅ cPorter (PHP) **đọc/ghi được mọi thư mục** dưới `/home/<user>/` → không cần root để thao tác sibling folders. Đây là nền tảng khiến ý tưởng khả thi. |
-| `exec`/`proc_open` **KHÔNG dùng được** trên host này (đã test — §2.1); `system`/`shell_exec`/`passthru` bị chặn | ⚠️ **Không chạy được lệnh của app đích (vd `php artisan migrate`) từ web PHP.** Giải pháp chính: **cron-worker** chạy trong shell riêng của cron (không bị `disable_functions` chặn) — §9. Đây là rủi ro #1. |
-| `symlink()` và `rename()` (PHP) thường **được bật** | ✅ Atomic swap `current` bằng symlink khả thi (Capistrano/Deployer style). |
-| Không có `tar`/`unzip` qua shell (exec bị chặn) | ✅ Dùng **`ZipArchive` (ext-zip, đã test runtime)** để giải nén, không phụ thuộc shell. Artifact = `.zip` (§2.1). |
-| **Inode limit** (giới hạn số file) rất chặt trên shared hosting | ✅ **Không** upload `node_modules`; FE build sẵn thành static ở CI. BE ship kèm `vendor/` đã cài. Giới hạn số release giữ lại (`keep_releases`). |
-| **Disk quota** hạn chế | ✅ Prune release cũ; nén artifact; dọn tmp sau extract. |
-| **max_execution_time / memory_limit / upload_max_filesize** thấp | ⚠️ Upload artifact lớn qua 1 request dễ timeout → hỗ trợ **chunked upload** + xử lý extract theo bước (§6). |
-| Cron: cPanel cho tạo cron job (UI hoặc UAPI) | ✅ Một cron duy nhất gọi endpoint scheduler của cPorter (§10). |
-| Document root add-on domain là **đường dẫn cố định** khi tạo domain | ✅ Trỏ docroot vào `.../current/public` (Laravel) hoặc `.../current` (static); Apache cPanel mặc định `SymLinksIfOwnerMatch` → symlink cùng owner hoạt động. |
-| Không có Redis/systemd/queue worker thường trực | ✅ Queue dùng **driver `database`**; worker chạy bằng cron `queue:work --stop-when-empty` hoặc xử lý synchronous cho MVP. |
-| PHP CLI binary của app đích có thể khác PHP-FPM (EA-PHP nhiều version) | ✅ Cấu hình **đường dẫn PHP binary per-project** (vd `/opt/cpanel/ea-php82/root/usr/bin/php`). |
+| PHP runs **under the main cPanel user's privileges** (suEXEC / PHP-FPM per-user) | ✅ cPorter (PHP) **can read/write every folder** under `/home/<user>/` → no root needed to manipulate sibling folders. This is the foundation that makes the idea feasible. |
+| `exec`/`proc_open` **CANNOT be used** on this host (tested — §2.1); `system`/`shell_exec`/`passthru` are blocked | ⚠️ **The target app's commands (e.g. `php artisan migrate`) cannot be run from web PHP.** Primary solution: a **cron-worker** running in cron's own shell (not blocked by `disable_functions`) — §9. This is risk #1. |
+| `symlink()` and `rename()` (PHP) are usually **enabled** | ✅ Atomic swap of `current` via symlink is feasible (Capistrano/Deployer style). |
+| No `tar`/`unzip` via shell (exec is blocked) | ✅ Use **`ZipArchive` (ext-zip, tested at runtime)** to extract, with no shell dependency. Artifact = `.zip` (§2.1). |
+| **Inode limit** (file count limit) is very strict on shared hosting | ✅ **Do not** upload `node_modules`; the FE is pre-built into static files in CI. The BE ships with `vendor/` already installed. Limit the number of retained releases (`keep_releases`). |
+| **Disk quota** is limited | ✅ Prune old releases; compress artifacts; clean up tmp after extract. |
+| Low **max_execution_time / memory_limit / upload_max_filesize** | ⚠️ Uploading a large artifact in a single request easily times out → support **chunked upload** + step-wise extraction (§6). |
+| Cron: cPanel allows creating cron jobs (UI or UAPI) | ✅ A single cron calls cPorter's scheduler endpoint (§10). |
+| The document root of an addon domain is a **fixed path** once the domain is created | ✅ Point the docroot to `.../current/public` (Laravel) or `.../current` (static); cPanel's Apache defaults to `SymLinksIfOwnerMatch` → same-owner symlinks work. |
+| No always-on Redis/systemd/queue worker | ✅ Queue uses the **`database` driver**; the worker runs via cron `queue:work --stop-when-empty`, or synchronous processing for the MVP. |
+| The target app's PHP CLI binary may differ from PHP-FPM (multiple EA-PHP versions) | ✅ Configure the **PHP binary path per-project** (e.g. `/opt/cpanel/ea-php82/root/usr/bin/php`). |
 
-> **[XÁC NHẬN]** Toàn bộ project được quản lý nằm **cùng một tài khoản cPanel** với cPorter
-> (cùng `/home/<user>/`). Đây là single-tenant (chốt §17.6).
+> **[CONFIRMED]** All managed projects reside in the **same cPanel account** as cPorter
+> (the same `/home/<user>/`). This is single-tenant (finalized in §17.6).
 
-### 2.1 Hồ sơ năng lực môi trường (đã test thực tế — 2026-07-17)
+### 2.1 Environment capability profile (tested in practice — 2026-07-17)
 
-> Nguồn: người dùng đã probe trực tiếp trên host đích. Đây là **facts**, chi phối toàn bộ thiết kế bên dưới.
+> Source: the user probed the target host directly. These are **facts** that govern the entire design below.
 
 - **Runtime:** PHP **8.3**, **LiteSpeed**, single cPanel account.
-- **`open_basedir` = OFF** → PHP đọc/ghi được toàn bộ `/home/<user>/`. ✅ Cần thiết cho ý tưởng, nhưng
-  **⚠️ jail đường dẫn phải tự enforce trong code** (bảo mật là trách nhiệm của cPorter, không có OS chặn hộ).
-- **Đã test chạy OK (runtime):** `mkdir`, `rmdir`, `file_put_contents`, `rename`, `unlink`, `scandir`,
+- **`open_basedir` = OFF** → PHP can read/write all of `/home/<user>/`. ✅ Necessary for the idea, but
+  **⚠️ the path jail must be enforced in code ourselves** (security is cPorter's responsibility; there is no OS to enforce it for us).
+- **Tested working (runtime):** `mkdir`, `rmdir`, `file_put_contents`, `rename`, `unlink`, `scandir`,
   `is_readable/is_writable/is_dir`, `disk_free_space/disk_total_space`, `ini_get`,
-  và đầy đủ **`ZipArchive`** (`open`/`addFromString`/`close`/`extractTo`).
-- **Function tồn tại nhưng CHƯA test runtime (coi là chưa chắc):** `copy`, `hash_hmac`, `random_bytes`,
+  and the full **`ZipArchive`** (`open`/`addFromString`/`close`/`extractTo`).
+- **Functions that exist but are NOT yet runtime-tested (treated as uncertain):** `copy`, `hash_hmac`, `random_bytes`,
   `readlink`, **`symlink`**, `exec`, `proc_open`, `popen`.
-- **Extensions có:** zip, curl, json, openssl, phar, mbstring.
-- **Bị chặn chắc chắn:** `system()`, `shell_exec()`, `passthru()`.
-- **Quyết định từ hồ sơ này:**
-  1. **`exec`/`proc_open` coi như KHÔNG dùng** → mọi lệnh cần shell (migrate/cache/queue) đi qua
-     **cron-worker** (§9), không chạy trực tiếp trong web request.
-  2. **Artifact = `.zip`** (dùng `ZipArchive` đã test chắc) — **không** dùng tar.gz/PharData.
-  3. **`symlink()` phải probe lúc cài**; có **fallback rename-swap** nếu host cấm symlink (§8/§11).
-  4. **Giới hạn upload:** `upload_max_filesize` 512MB, **`post_max_size` 256MB** → 1 request tối đa ~256MB;
-     vượt thì **chunked upload** (§6).
-  5. **HTTP client dùng cURL** (đã xác nhận) cho health check & webhook out.
-  6. **LiteSpeed đọc `.htaccess`** (Apache-compatible) → rewrite của Laravel `public/` và SPA fallback chạy được.
+- **Available extensions:** zip, curl, json, openssl, phar, mbstring.
+- **Definitely blocked:** `system()`, `shell_exec()`, `passthru()`.
+- **Decisions from this profile:**
+  1. **`exec`/`proc_open` are considered UNUSABLE** → every command that needs a shell (migrate/cache/queue) goes through the
+     **cron-worker** (§9), never run directly in a web request.
+  2. **Artifact = `.zip`** (using the reliably-tested `ZipArchive`) — **not** tar.gz/PharData.
+  3. **`symlink()` must be probed at install time**; there is a **rename-swap fallback** if the host forbids symlinks (§8/§11).
+  4. **Upload limits:** `upload_max_filesize` 512MB, **`post_max_size` 256MB** → a single request maxes out at ~256MB;
+     beyond that, use **chunked upload** (§6).
+  5. **The HTTP client uses cURL** (confirmed) for health checks & outbound webhooks.
+  6. **LiteSpeed reads `.htaccess`** (Apache-compatible) → Laravel's `public/` rewrites and the SPA fallback work.
 
 ---
 
-## 3. Kiến trúc tổng thể
+## 3. Overall Architecture
 
 ```
                     +----------------------+
@@ -127,46 +127,46 @@ Mô hình vận hành:
         /home/user/{learn,shop,api}.domain/{current,releases,shared,logs}
 ```
 
-**Nguyên tắc**: mọi thao tác filesystem đều đi qua **Storage Abstraction → cPanel FS Adapter**, và
-mọi lệnh cần shell đều đi qua **Command Runner** (có nhiều driver, fallback). Nhờ đó dễ test (fake adapter)
-và dễ mở rộng sang môi trường khác (SSH adapter, S3 artifact store…).
+**Principle**: every filesystem operation goes through the **Storage Abstraction → cPanel FS Adapter**, and
+every command that needs a shell goes through the **Command Runner** (multiple drivers, with fallbacks). This makes it easy to test (fake adapter)
+and easy to extend to other environments (SSH adapter, S3 artifact store…).
 
 ---
 
-## 4. Layout thư mục
+## 4. Directory Layout
 
-### 4.1 Trên cPanel (runtime)
+### 4.1 On cPanel (runtime)
 
 ```
 /home/user
-├── learn.domain/            # 1 project được quản lý
+├── learn.domain/            # a managed project
 │   ├── current -> releases/20260717_001   # symlink (atomic swap)
 │   ├── releases/
-│   │   ├── 20260717_001/                   # 1 release đã giải nén
+│   │   ├── 20260717_001/                   # an extracted release
 │   │   ├── 20260718_001/
 │   │   └── …
-│   ├── shared/                             # tồn tại xuyên release
+│   ├── shared/                             # persists across releases
 │   │   ├── .env
 │   │   └── storage/                        # (Laravel) uploads, cache, logs
-│   ├── deploy.lock                         # chống deploy trùng
-│   └── deploy.log                          # log deploy của project này
+│   ├── deploy.lock                         # prevents concurrent deploys
+│   └── deploy.log                          # deploy log for this project
 │
 ├── shop.domain/  …
 ├── api.domain/   …
-└── deploy.domain/           # <-- cPorter (cũng deploy theo cùng cơ chế)
+└── deploy.domain/           # <-- cPorter (also deployed via the same mechanism)
     ├── current -> releases/…
     ├── releases/…
     ├── shared/{.env, storage/, database.sqlite?}
-    └── storage/artifacts/                  # nơi lưu artifact upload tạm
+    └── storage/artifacts/                  # where uploaded artifacts are temporarily stored
 ```
 
-- **`current`**: symlink tới release đang active. Docroot domain trỏ vào `current/public` (Laravel) hoặc `current` (static).
-- **`releases/<id>`**: mỗi release là 1 thư mục bất biến. `<id>` = `YYYYMMDD_NNN` hoặc timestamp + short SHA.
-- **`shared/`**: file/thư mục cần giữ nguyên qua các release (`.env`, `storage/`, uploads). Release symlink ngược vào đây.
-- **`deploy.lock`**: file lock (chứa PID/deploy-id/timestamp) để serialize deploy per-project.
-- **`deploy.log`**: log dạng dòng cho từng project (song song với log trong DB).
+- **`current`**: symlink to the active release. The domain's docroot points to `current/public` (Laravel) or `current` (static).
+- **`releases/<id>`**: each release is an immutable folder. `<id>` = `YYYYMMDD_NNN` or timestamp + short SHA.
+- **`shared/`**: files/folders that must persist across releases (`.env`, `storage/`, uploads). Releases symlink back into here.
+- **`deploy.lock`**: a lock file (containing PID/deploy-id/timestamp) to serialize deploys per-project.
+- **`deploy.log`**: a line-based log for each project (in parallel with the log in the DB).
 
-### 4.2 Monorepo source (repository cPorter)
+### 4.2 Monorepo source (the cPorter repository)
 
 ```
 cporter/
@@ -185,182 +185,182 @@ cporter/
 │       ├── src/
 │       ├── index.html
 │       └── package.json
-├── build/                   # script gộp build → 1 artifact .zip deploy chung
+├── build/                   # script that combines the build → a single deployable .zip artifact
 │   └── build-artifact.mjs
-├── .github/workflows/       # CI mẫu để self-deploy cPorter
-├── package.json             # root: pnpm workspace, orchestrate build FE+BE
+├── .github/workflows/       # sample CI to self-deploy cPorter
+├── package.json             # root: pnpm workspace, orchestrates FE+BE build
 ├── pnpm-workspace.yaml
 └── README.md
 ```
 
-**Chiến lược "1 folder, 1 domain"**: FE build ra static rồi đặt vào `apps/api/public/` của Laravel.
-Laravel phục vụ `/api/*` là JSON API và fallback mọi route khác về `index.html` của SPA. Docroot
-domain = `deploy.domain/current/public`.
+**"One folder, one domain" strategy**: the FE is built into static files and placed into Laravel's `apps/api/public/`.
+Laravel serves `/api/*` as a JSON API and falls back every other route to the SPA's `index.html`. The domain docroot
+= `deploy.domain/current/public`.
 
 ---
 
-## 5. Domain Model (dữ liệu)
+## 5. Domain Model (data)
 
-DB: MySQL của cPanel (hoặc SQLite cho bản nhỏ — **[GIẢ ĐỊNH B]** dùng MySQL).
+DB: cPanel's MySQL (or SQLite for a small deployment — **[ASSUMPTION B]** use MySQL).
 
-| Entity | Trường chính | Ghi chú |
+| Entity | Key fields | Notes |
 |---|---|---|
 | **User** | id, name, email, password, role | Admin panel login. |
-| **ApiKey / Token** | id, name, prefix, hash, scopes[], project_id?, last_used_at, expires_at, revoked_at | Token cho CI. Lưu **hash** (Sanctum-style), hiển thị plaintext 1 lần. Scope: `deploy`, `read`, `rollback`, `admin`. |
-| **Project** | id, name, slug, base_path, type(`laravel`\|`static`\|`php`\|`node`), docroot_subpath, php_binary, keep_releases, health_check_url, hooks(json), shared_paths(json), status | Cấu hình 1 domain được quản lý. |
-| **Release** | id, project_id, ref/version, artifact_id, path, state(`pending`\|`extracting`\|`ready`\|`active`\|`superseded`\|`failed`), created_by, activated_at | 1 release vật lý. |
-| **Artifact** | id, project_id, filename, size, sha256, storage_path, uploaded_at, status | File build từ CI. |
-| **Deployment** | id, project_id, release_id, trigger(`api`\|`manual`\|`cron`), status(`queued`→`running`→`success`\|`failed`\|`rolled_back`), steps(json), started_at, finished_at, actor | 1 lần chạy pipeline. |
-| **AuditLog** | id, actor, action, subject, meta(json), ip, created_at | Ai làm gì, khi nào. |
+| **ApiKey / Token** | id, name, prefix, hash, scopes[], project_id?, last_used_at, expires_at, revoked_at | Token for CI. Stores the **hash** (Sanctum-style), shows plaintext once. Scopes: `deploy`, `read`, `rollback`, `admin`. |
+| **Project** | id, name, slug, base_path, type(`laravel`\|`static`\|`php`\|`node`), docroot_subpath, php_binary, keep_releases, health_check_url, hooks(json), shared_paths(json), status | Configuration for one managed domain. |
+| **Release** | id, project_id, ref/version, artifact_id, path, state(`pending`\|`extracting`\|`ready`\|`active`\|`superseded`\|`failed`), created_by, activated_at | One physical release. |
+| **Artifact** | id, project_id, filename, size, sha256, storage_path, uploaded_at, status | The build file from CI. |
+| **Deployment** | id, project_id, release_id, trigger(`api`\|`manual`\|`cron`), status(`queued`→`running`→`success`\|`failed`\|`rolled_back`), steps(json), started_at, finished_at, actor | One pipeline run. |
+| **AuditLog** | id, actor, action, subject, meta(json), ip, created_at | Who did what, when. |
 
-Quan hệ: `Project 1—* Release`, `Release 1—1 Artifact`, `Project 1—* Deployment`, `Deployment *—1 Release`.
+Relationships: `Project 1—* Release`, `Release 1—1 Artifact`, `Project 1—* Deployment`, `Deployment *—1 Release`.
 
 ---
 
-## 6. Deploy Pipeline (chi tiết)
+## 6. Deploy Pipeline (detailed)
 
-Mỗi bước ghi vào `Deployment.steps[]` (name, status, duration, output/tail) và stream ra `deploy.log`.
+Each step is written to `Deployment.steps[]` (name, status, duration, output/tail) and streamed to `deploy.log`.
 
 ```
 1. Receive Request      POST /api/v1/projects/{slug}/deployments  (metadata: version, sha256, size)
-2. Authenticate         Token hợp lệ + scope `deploy` + đúng project
-3. Acquire Lock         Tạo deploy.lock (atomic O_EXCL). Nếu đã lock → 409 Conflict (hoặc queue)
-4. Upload Artifact      Nhận file .zip (single ≤256MB, hoặc chunked). Lưu vào storage/artifacts/<uuid>.zip
-5. Verify Hash          Tính sha256 server-side == sha256 CI gửi. Sai → abort + unlock
-6. Prepare Release Dir  Tạo releases/<id>/
-7. Extract              ZipArchive::extractTo() vào release dir. Chống Zip-Slip. Kiểm inode/size cap
-8. Link Shared          symlink .env, storage/… từ shared/ vào release. Tạo thư mục shared nếu thiếu
-9. Validate             Kiểm cấu trúc bắt buộc (vd tồn tại public/index.php, index.html…)
-10. Pre-activate Hooks  (Laravel) migrate, config:cache… → enqueue cron-worker (§9). static/WP/PHP: bỏ qua
-11. Activate Release    symlink swap atomic: tạo current.tmp -> releases/<id> rồi rename → current
-12. Post-activate Hooks (Laravel) queue:restart, opcache reset… → cron-worker. static/WP/PHP: bỏ qua
-13. Health Check        GET health_check_url (cURL); kỳ vọng 2xx trong N giây. Fail → auto-rollback (§8)
-14. Prune               Xóa release cũ vượt keep_releases
-15. Success             Release.state=active, Deployment.status=success (Laravel: sau khi hooks cron xong)
-16. Release Lock        Xóa deploy.lock (kể cả khi fail — finally)
+2. Authenticate         Valid token + scope `deploy` + correct project
+3. Acquire Lock         Create deploy.lock (atomic O_EXCL). If already locked → 409 Conflict (or queue)
+4. Upload Artifact      Receive the .zip file (single ≤256MB, or chunked). Store into storage/artifacts/<uuid>.zip
+5. Verify Hash          Compute sha256 server-side == sha256 sent by CI. Mismatch → abort + unlock
+6. Prepare Release Dir  Create releases/<id>/
+7. Extract              ZipArchive::extractTo() into the release dir. Guard against Zip-Slip. Check inode/size cap
+8. Link Shared          symlink .env, storage/… from shared/ into the release. Create the shared folder if missing
+9. Validate             Check the required structure (e.g. public/index.php, index.html… exist)
+10. Pre-activate Hooks  (Laravel) migrate, config:cache… → enqueue to cron-worker (§9). static/WP/PHP: skip
+11. Activate Release    atomic symlink swap: create current.tmp -> releases/<id> then rename → current
+12. Post-activate Hooks (Laravel) queue:restart, opcache reset… → cron-worker. static/WP/PHP: skip
+13. Health Check        GET health_check_url (cURL); expect 2xx within N seconds. Fail → auto-rollback (§8)
+14. Prune               Delete old releases beyond keep_releases
+15. Success             Release.state=active, Deployment.status=success (Laravel: after the cron hooks finish)
+16. Release Lock        Delete deploy.lock (even on failure — finally)
 ```
 
-**Chunked upload** (khi artifact > `post_max_size` 256MB — §2.1):
-- `POST …/artifacts` → khởi tạo upload session (trả `upload_id`).
-- `PUT …/artifacts/{upload_id}/chunks/{n}` → gửi từng phần.
-- `POST …/artifacts/{upload_id}/complete` → ghép + verify sha256.
+**Chunked upload** (when the artifact > `post_max_size` 256MB — §2.1):
+- `POST …/artifacts` → initialize an upload session (returns `upload_id`).
+- `PUT …/artifacts/{upload_id}/chunks/{n}` → send each part.
+- `POST …/artifacts/{upload_id}/complete` → assemble + verify sha256.
 
-**Idempotency**: header `Idempotency-Key` để CI retry an toàn (không tạo deployment trùng).
+**Idempotency**: the `Idempotency-Key` header lets CI retry safely (without creating a duplicate deployment).
 
-**Xử lý lỗi**: bất kỳ bước 6–13 fail → dừng, KHÔNG đổi `current` (trừ khi đã ở bước 11+), ghi lỗi,
-auto-rollback nếu đã activate, luôn `finally { unlock }`.
+**Error handling**: if any of steps 6–13 fails → stop, do NOT swap `current` (unless already at step 11+), record the error,
+auto-rollback if already activated, and always `finally { unlock }`.
 
 ---
 
-## 7. Deploy API (đề xuất endpoints)
+## 7. Deploy API (proposed endpoints)
 
 Base: `https://deploy.domain/api/v1` · Auth: `Authorization: Bearer <token>`
 
-| Method | Path | Mô tả |
+| Method | Path | Description |
 |---|---|---|
-| POST | `/projects/{slug}/deployments` | Tạo & chạy 1 deployment (kèm/không kèm artifact) |
-| POST | `/projects/{slug}/artifacts` | Khởi tạo upload (chunked) |
-| PUT | `/artifacts/{uploadId}/chunks/{n}` | Upload 1 chunk |
-| POST | `/artifacts/{uploadId}/complete` | Hoàn tất + verify |
-| GET | `/projects/{slug}/deployments/{id}` | Trạng thái + steps (poll) |
-| GET | `/projects/{slug}/deployments/{id}/logs` | Stream/tail log |
-| POST | `/projects/{slug}/rollback` | Rollback về release trước / release chỉ định |
-| GET | `/projects/{slug}/releases` | Liệt kê releases |
-| GET | `/projects` | Danh sách project (scope read) |
+| POST | `/projects/{slug}/deployments` | Create & run a deployment (with or without an artifact) |
+| POST | `/projects/{slug}/artifacts` | Initialize an upload (chunked) |
+| PUT | `/artifacts/{uploadId}/chunks/{n}` | Upload a chunk |
+| POST | `/artifacts/{uploadId}/complete` | Finalize + verify |
+| GET | `/projects/{slug}/deployments/{id}` | Status + steps (poll) |
+| GET | `/projects/{slug}/deployments/{id}/logs` | Stream/tail the log |
+| POST | `/projects/{slug}/rollback` | Roll back to the previous release / a specified release |
+| GET | `/projects/{slug}/releases` | List releases |
+| GET | `/projects` | List projects (read scope) |
 | POST | `/webhooks/{provider}` | Webhook (GitHub/GitLab) — verify HMAC signature |
 
-**Response chuẩn**: JSON `{ data, meta, error }`. Deployment trả `202 Accepted` + `Location` để poll.
+**Standard response**: JSON `{ data, meta, error }`. A deployment returns `202 Accepted` + `Location` to poll.
 
 ---
 
 ## 8. Rollback Engine
 
-- **Nhanh (mặc định)**: đổi `current` về release trước đó (`superseded` gần nhất) hoặc release chỉ định →
-  symlink swap atomic (tạo `current.tmp` rồi `rename`). Chạy post-activate hooks (cache clear). Health check.
-- **Swap mechanism & fallback**: cơ chế chuẩn là **symlink swap** (`symlink()` + `rename()`). Nếu probe
-  phát hiện host **cấm symlink**, fallback **rename-swap thư mục**: `rename(current → current.old)` rồi
-  `rename(releases/<id> → current)` (có khoảng trống rất ngắn, chấp nhận cho host không hỗ trợ symlink;
-  releases vẫn giữ bản sao để rollback).
-- **Migration**: KHÔNG tự chạy `migrate:rollback` mặc định (nguy hiểm dữ liệu). Chỉ nêu cảnh báo &
-  cho phép hook thủ công. → **[GIẢ ĐỊNH C]** rollback = code-only.
-- **Auto-rollback**: nếu bước Health Check (13) fail sau khi activate → tự đổi symlink về release cũ,
-  đánh dấu deployment `rolled_back`.
+- **Fast (default)**: swap `current` back to the previous release (the most recent `superseded`) or a specified release →
+  atomic symlink swap (create `current.tmp` then `rename`). Run post-activate hooks (cache clear). Health check.
+- **Swap mechanism & fallback**: the standard mechanism is **symlink swap** (`symlink()` + `rename()`). If the probe
+  detects that the host **forbids symlinks**, fall back to **rename-swap of the folder**: `rename(current → current.old)` then
+  `rename(releases/<id> → current)` (there is a very brief gap, acceptable for hosts that do not support symlinks;
+  releases still retain copies for rollback).
+- **Migration**: do NOT run `migrate:rollback` automatically by default (data risk). Only surface a warning &
+  allow a manual hook. → **[ASSUMPTION C]** rollback = code-only.
+- **Auto-rollback**: if the Health Check step (13) fails after activation → automatically swap the symlink back to the old release,
+  marking the deployment `rolled_back`.
 
 ---
 
-## 9. Command Execution Strategy (rủi ro #1 — đã chốt hướng đi)
+## 9. Command Execution Strategy (risk #1 — direction finalized)
 
-**Vấn đề:** web PHP (LiteSpeed FPM) trên host này **không có `exec`/`proc_open`** (§2.1) → không thể
-gọi `php artisan migrate` hay bất kỳ lệnh shell nào của app đích ngay trong HTTP request.
+**Problem:** web PHP (LiteSpeed FPM) on this host **lacks `exec`/`proc_open`** (§2.1) → it cannot
+call `php artisan migrate` or any of the target app's shell commands inside an HTTP request.
 
-**Insight then chốt:** một **cron job cPanel chạy trong shell riêng do `crond` spawn**, KHÔNG bị
-`disable_functions` của PHP-FPM ràng buộc. Dòng lệnh cron được `/bin/sh` thực thi trực tiếp, nên
-`php artisan …` chạy bình thường. → cPorter tách làm **2 ngữ cảnh thực thi**:
+**Key insight:** a **cPanel cron job runs in its own shell spawned by `crond`**, NOT constrained by
+PHP-FPM's `disable_functions`. The cron command line is executed directly by `/bin/sh`, so
+`php artisan …` runs normally. → cPorter splits into **two execution contexts**:
 
-| Ngữ cảnh | Làm được gì | Dùng cho |
+| Context | What it can do | Used for |
 |---|---|---|
-| **Web PHP (đồng bộ)** | filesystem (mkdir/rename/unlink/scandir), `ZipArchive` extract, `symlink`, cURL health check | Toàn bộ pipeline của app **static / WordPress / PHP thuần**: extract → link shared → swap symlink → health check → prune. **Không cần shell.** |
-| **Cron shell (bất đồng bộ)** | chạy lệnh shell thật: `php artisan migrate/config:cache/queue:restart`, composer nếu cần, artisan của chính cPorter | **Hooks của app Laravel đích** + queue worker + housekeeping |
+| **Web PHP (synchronous)** | filesystem (mkdir/rename/unlink/scandir), `ZipArchive` extract, `symlink`, cURL health check | The entire pipeline for **static / WordPress / plain PHP** apps: extract → link shared → swap symlink → health check → prune. **No shell needed.** |
+| **Cron shell (asynchronous)** | run real shell commands: `php artisan migrate/config:cache/queue:restart`, composer if needed, cPorter's own artisan | **Hooks for the target Laravel app** + queue worker + housekeeping |
 
-### 9.1 Cơ chế Command Runner (driver `cron-worker`)
+### 9.1 Command Runner mechanism (`cron-worker` driver)
 
 ```
-Web request (deploy Laravel)                 Standing cron (mỗi ~1 phút)
+Web request (deploy Laravel)                 Standing cron (every ~1 minute)
 ──────────────────────────                   ─────────────────────────────
-1. extract + link + swap symlink   ┐         a. crond chạy: php <cporter>/current/artisan cporter:run-jobs
-2. enqueue "shell jobs":           │            (dòng lệnh này do shell chạy → KHÔNG cần exec trong PHP)
-   - php <target>/current/artisan  │         b. runner đọc jobs pending trong DB
-     migrate --force               │──────►  c. thực thi từng job bằng shell (qua chính cron command,
-   - artisan config:cache          │            không qua exec() của PHP)
-3. Deployment.status =             │         d. ghi kết quả (exit code, output) về Job + Deployment
-   "activated, hooks_pending"      ┘         e. chạy health check lại → success | failed(+auto-rollback)
+1. extract + link + swap symlink   ┐         a. crond runs: php <cporter>/current/artisan cporter:run-jobs
+2. enqueue "shell jobs":           │            (this command line is run by the shell → does NOT need exec in PHP)
+   - php <target>/current/artisan  │         b. the runner reads pending jobs from the DB
+     migrate --force               │──────►  c. executes each job via shell (through the cron command itself,
+   - artisan config:cache          │            not through PHP's exec())
+3. Deployment.status =             │         d. writes the result (exit code, output) back to Job + Deployment
+   "activated, hooks_pending"      ┘         e. re-runs the health check → success | failed(+auto-rollback)
 ```
 
-- **Job queue** lưu trong DB (`jobs` bảng riêng của cPorter, hoặc Laravel queue driver `database`).
-- **Runner** = artisan command `cporter:run-jobs` của chính cPorter, được cron gọi. Vì cron command
-  do shell chạy, runner có thể dùng shell để thực thi lệnh app đích **kể cả khi PHP `exec` bị chặn** —
-  cách chắc ăn nhất: **mỗi job là một dòng lệnh shell mà runner ghi ra rồi để cron kế tiếp chạy**, hoặc
-  runner thử `proc_open` (CLI PHP thường nới lỏng hơn FPM — probe riêng cho context CLI).
-- **Độ trễ:** hooks chạy trong ≤ chu kỳ cron (khuyến nghị 1 phút; có thể 1 cron/phút gọi liên tục).
-  Với app **không có hook** (static/WP/PHP) → deploy **tức thì, đồng bộ**, không đụng cron.
+- **Job queue** stored in the DB (cPorter's own `jobs` table, or Laravel's `database` queue driver).
+- **Runner** = cPorter's own `cporter:run-jobs` artisan command, invoked by cron. Because the cron command
+  is run by the shell, the runner can use the shell to execute the target app's commands **even when PHP `exec` is blocked** —
+  the safest approach: **each job is a shell command line that the runner writes out and lets the next cron run**, or
+  the runner tries `proc_open` (CLI PHP is usually less restricted than FPM — probe CLI context separately).
+- **Latency:** hooks run within ≤ one cron cycle (recommend 1 minute; you can have 1 cron/minute running continuously).
+  For apps **with no hooks** (static/WP/PHP) → deploy is **instant, synchronous**, never touching cron.
 
-### 9.2 Các driver (theo thứ tự ưu tiên trên host này)
+### 9.2 The drivers (in priority order on this host)
 
-| Driver | Trạng thái host này | Ghi chú |
+| Driver | Status on this host | Notes |
 |---|---|---|
-| `none` | ✅ mặc định cho static/WP/PHP | Không cần lệnh shell; toàn bộ chạy trong web PHP. |
-| `cron-worker` | ✅ **chính** cho Laravel | Chạy hooks qua cron shell context. Bất đồng bộ. |
-| `proc_open` (CLI) | ⚙️ probe | Nếu CLI PHP cho `proc_open`, runner chạy đồng bộ hơn trong cron. |
-| `ssh` (phpseclib) | ❔ chỉ khi host bật SSH | Không xác nhận trên host này; để tùy chọn. |
-| `manual` | ✅ fallback cuối | Đánh dấu `hooks_pending(manual)`, hiện lệnh cần chạy trên Admin để người dùng tự chạy. |
+| `none` | ✅ default for static/WP/PHP | No shell commands needed; everything runs in web PHP. |
+| `cron-worker` | ✅ **primary** for Laravel | Runs hooks via the cron shell context. Asynchronous. |
+| `proc_open` (CLI) | ⚙️ probe | If CLI PHP allows `proc_open`, the runner runs more synchronously within cron. |
+| `ssh` (phpseclib) | ❔ only if the host enables SSH | Not confirmed on this host; kept as an option. |
+| `manual` | ✅ last-resort fallback | Marks `hooks_pending(manual)`, shows the commands to run in the Admin panel for the user to run themselves. |
 
-### 9.3 Capability probe (lúc cài đặt & định kỳ)
+### 9.3 Capability probe (at install & periodically)
 
-cPorter chạy probe và lưu vào Settings, hiển thị ở Admin: `symlink` runtime OK?, `ZipArchive` OK?,
-`proc_open` (web & CLI) OK?, quyền ghi các `base_path`, dung lượng đĩa, phiên bản PHP, cron đã cấu hình chưa.
+cPorter runs a probe and stores it in Settings, displaying it in the Admin panel: is `symlink` runtime OK?, is `ZipArchive` OK?,
+`proc_open` (web & CLI) OK?, write permission on each `base_path`, disk space, PHP version, whether cron is configured.
 
-> **Hệ quả roadmap:** vì static/WP/PHP deploy được **hoàn toàn không cần shell**, MVP (Phase 1) làm nhóm
-> này trước; Laravel + cron-worker vào Phase 2 (§18).
+> **Roadmap consequence:** because static/WP/PHP can be deployed **entirely without a shell**, the MVP (Phase 1) does this group
+> first; Laravel + cron-worker come in Phase 2 (§18).
 
 ---
 
 ## 10. Scheduler / Cron
 
-- **Một** cron job cPanel (vd mỗi phút) gọi `GET/POST https://deploy.domain/cron/tick` (token nội bộ).
-- `cron/tick` xử lý: chạy `queue:work --stop-when-empty` (nếu dùng queue DB), prune release quá hạn,
-  timeout deployment treo (dọn lock cũ), retry health-check theo lịch, chạy scheduled task.
-- Có thể tạo cron tự động qua **cPanel UAPI** khi setup (nếu khả dụng), hoặc hướng dẫn tạo thủ công.
+- **One** cPanel cron job (e.g. every minute) calls `GET/POST https://deploy.domain/cron/tick` (internal token).
+- `cron/tick` handles: running `queue:work --stop-when-empty` (if using the DB queue), pruning expired releases,
+  timing out stuck deployments (cleaning up stale locks), retrying health checks on schedule, running scheduled tasks.
+- The cron can be created automatically via the **cPanel UAPI** at setup (if available), or via manual instructions.
 
 ---
 
 ## 11. Storage Abstraction & cPanel FS Adapter
 
-Interface (khái niệm):
+Interface (conceptual):
 
 ```
 StorageAdapter:
   putArtifact(stream) : path
-  extract(archive, destDir)        # PharData/ZipArchive, chống zip-slip
+  extract(archive, destDir)        # PharData/ZipArchive, guard against zip-slip
   symlinkAtomic(target, linkPath)  # ln -sfn = symlink tmp + rename
   linkShared(release, sharedPaths)
   pruneReleases(project, keep)
@@ -368,83 +368,83 @@ StorageAdapter:
   readCurrentTarget(project)
 ```
 
-**Jail / bảo mật đường dẫn**: mọi thao tác chỉ được phép trong danh sách `allowed_base_paths`
-(các `Project.base_path` + storage của cPorter). Chuẩn hóa `realpath` và từ chối nếu thoát khỏi jail
-(chống path traversal, symlink escape).
+**Jail / path security**: every operation is only permitted within the `allowed_base_paths` list
+(the `Project.base_path` entries + cPorter's own storage). Normalize with `realpath` and reject anything that escapes the jail
+(guards against path traversal, symlink escape).
 
-Cấu trúc adapter cho phép sau này thêm: `SshStorageAdapter`, `S3ArtifactStore`…
+The adapter structure allows adding later: `SshStorageAdapter`, `S3ArtifactStore`…
 
 ---
 
-## 12. Bảo mật (Security)
+## 12. Security
 
-- **Token/API Key**: sinh ngẫu nhiên, lưu **hash** (không lưu plaintext), hiển thị 1 lần. Có prefix để tra cứu.
-- **Scopes**: `read`, `deploy`, `rollback`, `admin`; giới hạn theo project.
-- **Webhook**: verify HMAC signature theo provider (GitHub `X-Hub-Signature-256`…).
-- **Rate limit** + optional **IP allowlist** cho API deploy.
-- **Zip-Slip / Path traversal**: validate mọi entry khi extract; jail đường dẫn (§11).
-- **Inode/size cap**: từ chối artifact vượt ngưỡng số file/dung lượng.
-- **Audit log** mọi hành động nhạy cảm (deploy, rollback, tạo/thu hồi token).
-- **Admin auth**: session + password hash (bcrypt/argon2); tùy chọn 2FA (roadmap).
-- **HTTPS bắt buộc** (cPanel AutoSSL / Let's Encrypt do user cấu hình).
-- **`.env` & secrets** để trong `shared/`, không nằm trong artifact, không log.
+- **Token/API Key**: randomly generated, stores the **hash** (never plaintext), shown once. Has a prefix for lookup.
+- **Scopes**: `read`, `deploy`, `rollback`, `admin`; scoped per project.
+- **Webhook**: verify the HMAC signature per provider (GitHub `X-Hub-Signature-256`…).
+- **Rate limit** + optional **IP allowlist** for the deploy API.
+- **Zip-Slip / Path traversal**: validate every entry during extraction; jail the paths (§11).
+- **Inode/size cap**: reject artifacts exceeding the file-count/size threshold.
+- **Audit log** for every sensitive action (deploy, rollback, token creation/revocation).
+- **Admin auth**: session + password hash (bcrypt/argon2); optional 2FA (roadmap).
+- **HTTPS required** (cPanel AutoSSL / Let's Encrypt configured by the user).
+- **`.env` & secrets** kept in `shared/`, not inside the artifact, never logged.
 
 ---
 
 ## 13. Admin Panel (React SPA)
 
-| Màn hình | Nội dung |
+| Screen | Content |
 |---|---|
-| **Dashboard** | Tổng quan project, deploy gần đây, tỷ lệ success, release đang active, cảnh báo (migration pending, lock treo). |
-| **Projects** | CRUD project (base_path, type, docroot, php_binary, hooks, health check, keep_releases). Nút "Deploy"/"Rollback". |
-| **Deployments** | Danh sách + trạng thái realtime (poll), timeline các step, log tail. |
-| **Releases** | Lịch sử release/project; activate (rollback) 1 release; xem diff version. |
-| **Logs** | Log tập trung (deploy + audit), filter theo project/status/time. |
-| **Settings** | Capability probe (exec/ssh/zip…), cấu hình global, cron status. |
-| **Users** | Quản lý user admin, role. |
-| **API Keys / Tokens** | Tạo/thu hồi token, gán scope & project, xem last_used. |
+| **Dashboard** | Project overview, recent deploys, success rate, active releases, alerts (pending migration, stuck lock). |
+| **Projects** | CRUD projects (base_path, type, docroot, php_binary, hooks, health check, keep_releases). "Deploy"/"Rollback" buttons. |
+| **Deployments** | List + realtime status (poll), step timeline, log tail. |
+| **Releases** | Release history per project; activate (rollback) a release; view version diff. |
+| **Logs** | Centralized logs (deploy + audit), filter by project/status/time. |
+| **Settings** | Capability probe (exec/ssh/zip…), global configuration, cron status. |
+| **Users** | Manage admin users, roles. |
+| **API Keys / Tokens** | Create/revoke tokens, assign scopes & projects, view last_used. |
 
-FE gọi cùng API `/api/v1` (dùng session hoặc token admin). Realtime: **polling** cho MVP
-(SSE/WebSocket khó trên shared hosting) — poll `deployments/{id}` mỗi 1–2s khi đang chạy.
+The FE calls the same `/api/v1` API (using a session or an admin token). Realtime: **polling** for the MVP
+(SSE/WebSocket is hard on shared hosting) — poll `deployments/{id}` every 1–2s while running.
 
 ---
 
-## 14. Deploy chính bản thân cPorter (self-hosting)
+## 14. Deploying cPorter itself (self-hosting)
 
-- cPorter là Laravel + React → cũng dùng đúng cơ chế release/symlink.
-- **Bootstrap lần đầu**: cài thủ công (upload build đầu tiên, tạo `.env` trong `shared/`, chạy migrate,
-  set docroot `deploy.domain/current/public`). Đây là chicken-and-egg nên bước 0 làm tay.
-- Sau đó: cPorter có thể **self-deploy** qua chính API của nó (project đặc biệt `self`) — cẩn trọng,
-  làm ở phase sau.
-- CI mẫu (`.github/workflows/deploy.yml`) build artifact rồi gọi API.
+- cPorter is Laravel + React → it uses the exact same release/symlink mechanism.
+- **First bootstrap**: install manually (upload the first build, create `.env` in `shared/`, run migrate,
+  set the docroot to `deploy.domain/current/public`). This is chicken-and-egg, so step 0 is done by hand.
+- Afterward: cPorter can **self-deploy** via its own API (a special `self` project) — with caution,
+  done in a later phase.
+- Sample CI (`.github/workflows/deploy.yml`) builds the artifact then calls the API.
 
-**Build artifact cPorter**:
-1. `apps/web`: `pnpm build` → copy `dist/` vào `apps/api/public/`.
+**Building the cPorter artifact**:
+1. `apps/web`: `pnpm build` → copy `dist/` into `apps/api/public/`.
 2. `apps/api`: `composer install --no-dev --optimize-autoloader`.
-3. Đóng gói `apps/api/` (đã có `public/` + `vendor/`) thành **`.zip`**, tính sha256.
-4. Upload + deploy qua API.
+3. Package `apps/api/` (now containing `public/` + `vendor/`) into a **`.zip`**, compute sha256.
+4. Upload + deploy via the API.
 
 ---
 
-## 15. Tech Stack (đề xuất)
+## 15. Tech Stack (proposed)
 
-| Layer | Lựa chọn | Lý do |
+| Layer | Choice | Reason |
 |---|---|---|
-| BE | **Laravel 12, PHP 8.2+** | Bạn đã chọn Laravel; ecosystem tốt, Artisan, migration. |
-| Auth API | **Laravel Sanctum** | Token hashed, scopes, đơn giản. |
-| Queue | **database driver** + cron worker | Shared hosting thường không có Redis. |
-| DB | **MySQL (cPanel)** | Sẵn có trên cPanel. |
-| FE | **React 19 + Vite + TypeScript** | Bạn đã chọn React; Vite build nhanh, ra static. |
-| FE UI kit | **Mantine v9** (core + hooks) + `@tabler/icons-react` + PostCSS preset | UI kit duy nhất — **không Tailwind**. Docs khai thác qua `llms.txt` (xem [docs/FRONTEND.md](FRONTEND.md) + skill `mantine-ui`). |
-| FE state/data | React Query 5 + React Router 7 | Chuẩn phổ biến, dễ maintain. |
-| Artifact | **ZIP** (`ZipArchive`) | Đã test runtime OK (§2.1). Không dùng tar.gz/PharData. |
-| Command exec | **cron-worker** (artisan `cporter:run-jobs` chạy qua cron) | exec/proc_open không dùng được ở web PHP (§9). |
-| SSH (optional) | phpseclib | Driver `ssh` — chỉ khi host bật SSH (không xác nhận trên host hiện tại). |
-| Test | Pest/PHPUnit (BE), Vitest (FE) | Có **FakeStorageAdapter** để test pipeline không đụng FS thật. |
+| BE | **Laravel 12, PHP 8.2+** | Laravel was chosen; good ecosystem, Artisan, migrations. |
+| Auth API | **Laravel Sanctum** | Hashed tokens, scopes, simple. |
+| Queue | **database driver** + cron worker | Shared hosting usually has no Redis. |
+| DB | **MySQL (cPanel)** | Available on cPanel. |
+| FE | **React 19 + Vite + TypeScript** | React was chosen; Vite builds fast and produces static output. |
+| FE UI kit | **Mantine v9** (core + hooks) + `@tabler/icons-react` + PostCSS preset | The only UI kit — **no Tailwind**. Docs consumed via `llms.txt` (see [docs/FRONTEND.md](FRONTEND.md) + the `mantine-ui` skill). |
+| FE state/data | React Query 5 + React Router 7 | Common standard, easy to maintain. |
+| Artifact | **ZIP** (`ZipArchive`) | Tested working at runtime (§2.1). Does not use tar.gz/PharData. |
+| Command exec | **cron-worker** (artisan `cporter:run-jobs` run via cron) | exec/proc_open are unusable in web PHP (§9). |
+| SSH (optional) | phpseclib | The `ssh` driver — only if the host enables SSH (not confirmed on the current host). |
+| Test | Pest/PHPUnit (BE), Vitest (FE) | There is a **FakeStorageAdapter** to test the pipeline without touching the real FS. |
 
 ---
 
-## 16. Cấu hình Project (ví dụ)
+## 16. Project Configuration (example)
 
 ```jsonc
 {
@@ -464,65 +464,65 @@ FE gọi cùng API `/api/v1` (dùng session hoặc token admin). Realtime: **pol
 }
 ```
 
-- `type: static` → bỏ qua hooks/command runner, chỉ extract + swap symlink (an toàn nhất trên shared).
+- `type: static` → skip hooks/command runner, only extract + swap symlink (the safest on shared hosting).
 
 ---
 
-## 17. Quyết định đã chốt & câu hỏi còn lại
+## 17. Decisions Made & Open Questions
 
-### 17.1 Đã chốt (2026-07-17)
+### 17.1 Finalized (2026-07-17)
 
-| # | Quyết định | Chốt |
+| # | Decision | Resolution |
 |---|---|---|
-| 1 | Command exec cho app đích | **Không có exec/proc_open** ở web PHP → dùng **cron-worker** (§9). Static/rollback không cần shell. |
-| 2 | Phạm vi tài khoản | **Single-tenant, cùng 1 cPanel account.** Multi-tenant → roadmap Phase 4. |
+| 1 | Command exec for the target app | **No exec/proc_open** in web PHP → use the **cron-worker** (§9). Static/rollback need no shell. |
+| 2 | Account scope | **Single-tenant, same cPanel account.** Multi-tenant → roadmap Phase 4. |
 | 3 | Database | **MySQL (cPanel).** |
-| 4 | App type ở MVP | **static/React SPA, Laravel, WordPress/PHP thuần.** (Node/Passenger → phase sau.) |
+| 4 | App types in the MVP | **static/React SPA, Laravel, WordPress/plain PHP.** (Node/Passenger → later phase.) |
 | 5 | Artifact format | **ZIP** (§2.1). |
 
-### 17.2 Còn lại — nên làm rõ trước/khi vào code
+### 17.2 Remaining — should be clarified before/at coding time
 
-1. **Kích thước artifact thực tế** dự kiến bao nhiêu MB? < 200MB → single upload cho MVP, chunked để Phase 2;
-   hay > 256MB → cần chunked ngay.
-2. **WordPress**: chỉ deploy code (theme/plugin/`wp-content`) hay cả core? shared_paths cho WP
-   (`wp-content/uploads`, `wp-config.php`) — xác nhận để định nghĩa `type: wordpress` đúng.
-3. **Health check URL** cho từng loại app: Laravel 12 có `/up` sẵn; static/WP cần URL nào?
-4. **Cron interval** chấp nhận cho hooks Laravel (1 phút?) — ảnh hưởng độ trễ deploy Laravel.
-5. **CI đầu tiên tích hợp** (GitHub Actions?) để làm mẫu workflow + SDK trước.
+1. **Actual artifact size** — how many MB is expected? < 200MB → single upload for the MVP, chunked in Phase 2;
+   or > 256MB → chunked needed right away.
+2. **WordPress**: deploy only code (theme/plugin/`wp-content`) or the core too? shared_paths for WP
+   (`wp-content/uploads`, `wp-config.php`) — confirm to define `type: wordpress` correctly.
+3. **Health check URL** for each app type: Laravel 12 has `/up` built in; what URL do static/WP need?
+4. **Cron interval** acceptable for Laravel hooks (1 minute?) — affects Laravel deploy latency.
+5. **First CI integration** (GitHub Actions?) to make a sample workflow + SDK first.
 
 ---
 
-## 18. Roadmap theo phase
+## 18. Phased Roadmap
 
 **Phase 0 — Foundation**
-- Scaffold monorepo (Laravel + React + build script + CI mẫu).
+- Scaffold the monorepo (Laravel + React + build script + sample CI).
 - Domain model + migrations. Auth (Sanctum) + API key. Capability probe.
 
-**Phase 1 — MVP Deploy (static/SPA trước)**
+**Phase 1 — MVP Deploy (static/SPA first)**
 - Storage Abstraction + cPanel FS Adapter (symlink, extract, prune, lock).
-- Pipeline đầy đủ cho `type: static`: upload → verify → extract → activate → health check → prune.
-- Rollback (symlink). Admin: Projects, Deployments, Releases, Logs cơ bản.
+- Full pipeline for `type: static`: upload → verify → extract → activate → health check → prune.
+- Rollback (symlink). Admin: basic Projects, Deployments, Releases, Logs.
 
 **Phase 2 — Laravel target + Hooks**
 - Command Runner (exec/ssh/manual) + hooks (migrate/cache/queue).
 - Chunked upload. Idempotency. Auto-rollback.
 
-**Phase 3 — Hoàn thiện Admin & Scheduler**
+**Phase 3 — Complete Admin & Scheduler**
 - Dashboard, Users, Tokens UI. Cron scheduler (queue worker, prune, timeout). Audit log UI.
 
-**Phase 4 — Ecosystem (tương lai)**
-- GitHub Action chính thức, JS SDK, PHP SDK, CLI, Plugin/Adapter API, đa server/đa account.
+**Phase 4 — Ecosystem (future)**
+- Official GitHub Action, JS SDK, PHP SDK, CLI, Plugin/Adapter API, multi-server/multi-account.
 
 ---
 
-## 19. Rủi ro & giảm thiểu (tóm tắt)
+## 19. Risks & Mitigations (summary)
 
-| Rủi ro | Mức | Giảm thiểu |
+| Risk | Level | Mitigation |
 |---|---|---|
-| `exec` bị chặn → không migrate được | Cao | Command Runner đa driver + fallback manual; ưu tiên static trước (§9) |
-| Timeout khi upload/extract artifact lớn | TB | Chunked upload, extract theo bước, tăng limit qua `.htaccess`/php.ini nếu cho phép |
-| Inode/disk quota đầy | TB | Không ship node_modules, prune release, cap file count |
-| Symlink không được phép/không follow ở docroot | TB→Thấp | Probe khi setup; fallback copy-swap nếu host cấm symlink |
-| Deploy trùng / lock treo | TB | Lock atomic O_EXCL + TTL, cron dọn lock quá hạn |
-| Rollback làm hỏng dữ liệu do migration | Cao | Rollback code-only mặc định, cảnh báo rõ (§8) |
+| `exec` blocked → cannot migrate | High | Multi-driver Command Runner + manual fallback; prioritize static first (§9) |
+| Timeout when uploading/extracting a large artifact | Medium | Chunked upload, step-wise extraction, raise limits via `.htaccess`/php.ini if allowed |
+| Inode/disk quota full | Medium | Do not ship node_modules, prune releases, cap file count |
+| Symlink not allowed/not followed at the docroot | Medium→Low | Probe at setup; fall back to copy-swap if the host forbids symlinks |
+| Concurrent deploy / stuck lock | Medium | Atomic O_EXCL lock + TTL, cron cleans up expired locks |
+| Rollback corrupts data due to migration | High | Rollback is code-only by default, with a clear warning (§8) |
 ```

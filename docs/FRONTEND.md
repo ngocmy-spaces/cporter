@@ -1,12 +1,12 @@
 # cPorter Frontend (apps/web)
 
-Admin SPA cho cPorter. **Stack:** React 19 + Vite + TypeScript + **Mantine v9** (UI kit duy nhất) +
+Admin SPA for cPorter. **Stack:** React 19 + Vite + TypeScript + **Mantine v9** (the only UI kit) +
 React Router 7 + TanStack Query 5 + `@tabler/icons-react`.
 
-> **Nguyên tắc số 1: Mantine-only.** Không Tailwind, không UI kit khác, không CSS framework tự chế.
-> Style bằng Mantine component + style props + theme; cần scoped CSS thì dùng CSS Modules với biến CSS của Mantine.
+> **Rule #1: Mantine-only.** No Tailwind, no other UI kit, no home-grown CSS framework.
+> Style with Mantine components + style props + theme; when you need scoped CSS, use CSS Modules with Mantine's CSS variables.
 
-## Cấu trúc
+## Structure
 
 ```
 apps/web/
@@ -14,58 +14,58 @@ apps/web/
 ├── src/
 │   ├── main.tsx              # import styles.css → ColorSchemeScript + MantineProvider + QueryClient + Router
 │   ├── theme.ts              # createTheme (primaryColor indigo, radius, font)
-│   ├── index.css             # chỉ global nhỏ (Mantine styles.css lo phần reset)
+│   ├── index.css             # only small globals (Mantine styles.css handles the reset)
 │   ├── App.tsx               # routes
 │   ├── components/
 │   │   ├── Layout.tsx        # AppShell (header + navbar + color-scheme toggle)
 │   │   └── Placeholder.tsx
-│   ├── pages/                # Dashboard + 7 trang (Projects, Deployments, …)
+│   ├── pages/                # Dashboard + 7 pages (Projects, Deployments, …)
 │   └── lib/
 │       ├── api.ts            # axios client, base /api/v1, bearer token
 │       └── queryClient.ts
 ```
 
-## Setup Mantine (đã cấu hình)
+## Mantine setup (already configured)
 
-- **Thứ tự import CSS quan trọng:** `@mantine/core/styles.css` **trước** mọi CSS/app khác (trong `main.tsx`).
-  Sub-package nào dùng thì import `styles.css` của nó **sau** core.
+- **CSS import order matters:** `@mantine/core/styles.css` **before** any other CSS/app code (in `main.tsx`).
+  For any sub-package you use, import its `styles.css` **after** core.
 - Provider: `<ColorSchemeScript defaultColorScheme="auto" />` + `<MantineProvider theme={theme} defaultColorScheme="auto">`.
-- Design tokens sửa ở `theme.ts` (đừng hardcode hex/px trong component).
-- Dark/light: `defaultColorScheme="auto"`; toggle bằng `useMantineColorScheme` (đã có nút trên header).
+- Edit design tokens in `theme.ts` (don't hardcode hex/px in components).
+- Dark/light: `defaultColorScheme="auto"`; toggle with `useMantineColorScheme` (the button is already in the header).
 
-## Khai thác tài liệu Mantine qua `llms.txt`
+## Leveraging the Mantine docs via `llms.txt`
 
-Mantine có bộ docs tối ưu cho LLM — **đây là nguồn chân lý cho đúng version đang dùng**:
+Mantine ships LLM-optimized docs — **this is the source of truth for the exact version in use**:
 
 - Index: `https://mantine.dev/llms.txt`
-- Trang từng chủ đề: `https://mantine.dev/llms/<section>-<kebab-name>.md`
-  (vd `core-app-shell.md`, `core-table.md`, `form-use-form.md`, `x-notifications.md`, `theming-colors.md`)
-- Gộp tất cả (lớn, ít dùng): `https://mantine.dev/llms-full.txt`
+- Per-topic pages: `https://mantine.dev/llms/<section>-<kebab-name>.md`
+  (e.g. `core-app-shell.md`, `core-table.md`, `form-use-form.md`, `x-notifications.md`, `theming-colors.md`)
+- Everything combined (large, rarely needed): `https://mantine.dev/llms-full.txt`
 
-**Quy tắc:** không chắc prop/component → `WebFetch`/`curl` trang `.md` tương ứng rồi dùng đúng API tài liệu,
-**không đoán**.
+**Rule:** unsure about a prop/component → `WebFetch`/`curl` the matching `.md` page and use the documented API,
+**don't guess**.
 
-## Hỗ trợ AI agent
+## AI agent support
 
-- **Skill `mantine-ui`** ([.claude/skills/mantine-ui/](../.claude/skills/mantine-ui/SKILL.md)) — nạp trước
-  khi làm UI: rule Mantine-only, bản đồ URL `llms.txt`, workflow tra cứu, setup facts, cheat-sheet component.
+- **Skill `mantine-ui`** ([.claude/skills/mantine-ui/](../.claude/skills/mantine-ui/SKILL.md)) — load it before
+  doing UI work: the Mantine-only rule, `llms.txt` URL map, lookup workflow, setup facts, component cheat-sheet.
 - **Agent `mantine-ui-engineer`** ([.claude/agents/mantine-ui-engineer.md](../.claude/agents/mantine-ui-engineer.md))
-  — subagent chuyên build UI Mantine, tự verify prop qua docs + chạy build/lint. Delegate mọi task FE lớn vào đây.
+  — a subagent specialized in building Mantine UI that self-verifies props against the docs + runs build/lint. Delegate every large FE task here.
 
 ## Conventions
 
 - **Icons:** `import { IconRocket } from '@tabler/icons-react'` → `<IconRocket size={18} stroke={1.5} />`.
-- **Router link:** `component={Link}` trên `NavLink`/`Anchor`/`Button`.
-- **Responsive:** props nhận object theo breakpoint, vd `cols={{ base: 1, sm: 2, lg: 4 }}`.
-- **Data:** TanStack Query + `@/lib/api`; resource chạy dài (deployment) thì poll bằng `refetchInterval`
-  (cPanel không có websocket).
+- **Router link:** `component={Link}` on `NavLink`/`Anchor`/`Button`.
+- **Responsive:** props accept an object keyed by breakpoint, e.g. `cols={{ base: 1, sm: 2, lg: 4 }}`.
+- **Data:** TanStack Query + `@/lib/api`; for long-running resources (deployment) poll with `refetchInterval`
+  (cPanel has no websocket).
 
 ## Dev & Build
 
 ```bash
 pnpm dev:web                       # Vite dev, proxy /api → :8000
-pnpm --filter @cporter/web build   # tsc -b && vite build  (bắt buộc pass)
-pnpm --filter @cporter/web lint    # eslint (bắt buộc pass)
+pnpm --filter @cporter/web build   # tsc -b && vite build  (must pass)
+pnpm --filter @cporter/web lint    # eslint (must pass)
 ```
 
-Khi deploy: `dist/` được copy vào `apps/api/public` (xem [SPEC §14](SPEC.md#14-deploy-chính-bản-thân-cporter-self-hosting)).
+On deploy: `dist/` is copied into `apps/api/public` (see [SPEC §14](SPEC.md#14-deploying-cporter-itself-self-hosting)).
