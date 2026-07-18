@@ -28,4 +28,9 @@ echo "[cporter] migrate --seed…"
 php artisan migrate --force --seed
 
 echo "[cporter] serving on :8000 (admin: admin@cporter.local / password)"
-exec php artisan serve --host=0.0.0.0 --port=8000
+# Use php's built-in server directly (not `artisan serve`, which forwards a computed env
+# to a child process and would pick up the mounted .env over the compose env vars).
+# server.php uses getcwd() as the public path, so run it from public/.
+ROUTER="$PWD/vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php"
+cd public
+exec php -S 0.0.0.0:8000 "$ROUTER"
