@@ -3,6 +3,7 @@ import {
   ActionIcon,
   AppShell,
   Badge,
+  Burger,
   Group,
   NavLink,
   Text,
@@ -10,6 +11,7 @@ import {
   useComputedColorScheme,
   useMantineColorScheme,
 } from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import {
   IconFileText,
@@ -86,19 +88,27 @@ function UserMenu() {
 export function Layout() {
   const { pathname } = useLocation();
   const { user } = useAuth();
+  const [mobileOpened, { toggle: toggleMobile, close: closeMobile }] = useDisclosure(false);
   const isActive = (item: NavItem) => (item.end ? pathname === item.to : pathname.startsWith(item.to));
   const navItems = NAV.filter((item) => item.to !== '/users' || user?.role === 'admin');
 
   return (
-    <AppShell header={{ height: 56 }} navbar={{ width: 240, breakpoint: 'sm' }} padding="md">
+    <AppShell
+      header={{ height: 56 }}
+      navbar={{ width: 240, breakpoint: 'sm', collapsed: { mobile: !mobileOpened, desktop: false } }}
+      padding="md"
+    >
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between">
-          <Text fw={700} size="lg">
-            c
-            <Text span inherit c="indigo.5">
-              Porter
+          <Group gap="sm">
+            <Burger opened={mobileOpened} onClick={toggleMobile} hiddenFrom="sm" size="sm" aria-label="Toggle navigation" />
+            <Text fw={700} size="lg">
+              c
+              <Text span inherit c="indigo.5">
+                Porter
+              </Text>
             </Text>
-          </Text>
+          </Group>
           <Group gap="sm">
             <Badge variant="light" color="gray">
               v0.1.0 · Phase 0
@@ -120,6 +130,7 @@ export function Layout() {
               label={item.label}
               leftSection={<Icon size={18} stroke={1.5} />}
               active={isActive(item)}
+              onClick={closeMobile}
             />
           );
         })}
