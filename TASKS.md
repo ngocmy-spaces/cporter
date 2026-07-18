@@ -36,7 +36,7 @@ and **spec reference**. Legend: ✅ done · 🔜 next · ⬜ todo · 🔒 blocke
 | **T1.6** | Health check + auto-rollback | ✅ | `HealthChecker` (Http/cURL, retry until timeout) after activate; on fail → `auto_rollback` to previous release, deployment=`rolled_back`. Shares `StepRunner` | §6, §8 |
 | **T1.7** | Rollback engine + endpoint | ✅ | `RollbackEngine` (previous/specified release, code-only) + `POST /projects/{slug}/rollback` (apikey+scope:rollback). **54 tests pass** | §8 |
 | **T1.8** | Read endpoints | ✅ | Admin (session): `GET /deployments` (recent), `GET /deployments/{id}`, `GET /projects/{p}/deployments`, `GET /projects/{p}/releases`, `POST /releases/{id}/activate` (rollback từ UI). Logs = `Deployment.steps`. **58 tests pass** | §7 |
-| **T1.9** | Admin UI (deploy core) | 🔒 T1.4,T1.8 | Projects CRUD; Deployments list + detail (poll steps/log); Releases (activate=rollback); Logs | §13 |
+| **T1.9** | Admin UI (deploy core) | ✅ | Mantine SPA nối API thật: login (session+CSRF via `/csrf`), Dashboard, Projects (+create), Deployments (+drawer steps Timeline poll), Releases (+activate/rollback), Settings (capabilities), API Keys (+token-once). Build+lint xanh. Backend hardening: JSON 401 cho `/api/*` (no `login` redirect) + `/csrf`. **60 tests** | §13 |
 | **T1.10** | Tests pipeline | 🔒 T1.5 | `FakeStorageAdapter`; e2e feature test deploy static + rollback + lock-conflict | §15 |
 
 **Milestone M1:** ✅ ACHIEVED — deploy + rollback static site via API, atomic, health check + auto-rollback.

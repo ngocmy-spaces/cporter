@@ -16,6 +16,9 @@ export default defineConfig({
       '/api': {
         target: process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:8000',
         changeOrigin: true,
+        // Admin auth is a same-origin session cookie (Sanctum SPA + CSRF). Rewrite the
+        // cookie's Domain attribute so it round-trips through the Vite dev proxy.
+        cookieDomainRewrite: '',
       },
     },
   },

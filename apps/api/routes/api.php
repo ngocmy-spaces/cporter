@@ -25,6 +25,10 @@ Route::prefix('v1')->group(function () {
 
     // ── Admin (same-origin session, web guard) ────────────────────────────
     Route::middleware('web')->group(function () {
+        // Public: primes the XSRF-TOKEN cookie for the SPA before any POST. (A 401 on
+        // /auth/user short-circuits CSRF's cookie-add, so the SPA can't rely on it.)
+        Route::get('/csrf', fn () => response()->noContent());
+
         Route::post('/auth/login', [AuthController::class, 'login']);
 
         Route::middleware('auth')->group(function () {

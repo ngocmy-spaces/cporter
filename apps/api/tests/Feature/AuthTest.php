@@ -25,6 +25,15 @@ it('rejects invalid credentials with 422', function () {
     ])->assertStatus(422);
 });
 
+it('primes the CSRF cookie via GET /csrf', function () {
+    $this->get('/api/v1/csrf')->assertNoContent();
+});
+
+it('returns JSON 401 for unauthenticated api requests even without an Accept header', function () {
+    // Regression: must not redirect to a non-existent `login` route (500). See bootstrap/app.php.
+    $this->get('/api/v1/auth/user')->assertStatus(401);
+});
+
 it('requires authentication for protected admin endpoints', function () {
     $this->getJson('/api/v1/auth/user')->assertUnauthorized();
     $this->getJson('/api/v1/system/capabilities')->assertUnauthorized();

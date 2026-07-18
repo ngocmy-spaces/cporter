@@ -6,6 +6,7 @@ import {
   Group,
   NavLink,
   Text,
+  Tooltip,
   useComputedColorScheme,
   useMantineColorScheme,
 } from '@mantine/core';
@@ -15,6 +16,7 @@ import {
   IconFolders,
   IconKey,
   IconLayoutDashboard,
+  IconLogout,
   IconMoon,
   IconRocket,
   IconSettings,
@@ -22,6 +24,7 @@ import {
   IconUsers,
   IconVersions,
 } from '@tabler/icons-react';
+import { useAuth } from '@/lib/auth';
 
 type NavItem = {
   to: string;
@@ -56,6 +59,30 @@ function ColorSchemeToggle() {
   );
 }
 
+function UserMenu() {
+  const { user, logout } = useAuth();
+  if (!user) return null;
+
+  return (
+    <Group gap={6}>
+      <Text size="sm" c="dimmed">
+        {user.email}
+      </Text>
+      <Tooltip label="Log out">
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="lg"
+          aria-label="Log out"
+          onClick={() => void logout()}
+        >
+          <IconLogout size={18} stroke={1.5} />
+        </ActionIcon>
+      </Tooltip>
+    </Group>
+  );
+}
+
 export function Layout() {
   const { pathname } = useLocation();
   const isActive = (item: NavItem) => (item.end ? pathname === item.to : pathname.startsWith(item.to));
@@ -74,6 +101,7 @@ export function Layout() {
             <Badge variant="light" color="gray">
               v0.1.0 · Phase 0
             </Badge>
+            <UserMenu />
             <ColorSchemeToggle />
           </Group>
         </Group>

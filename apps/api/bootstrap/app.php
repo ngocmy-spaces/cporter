@@ -20,7 +20,19 @@ return Application::configure(basePath: dirname(__DIR__))
             'apikey' => \App\Http\Middleware\AuthenticateApiKey::class,
             'scope' => \App\Http\Middleware\EnsureApiScope::class,
         ]);
+
+        // API-only app: never redirect guests to a (non-existent) `login` route.
+        $middleware->redirectGuestsTo(fn () => null);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // This is an API: always render errors as JSON for /api/* ...
+        $exceptions->shouldRenderJsonWhen(
+            fn ($request) => $request->is('api/*') || $request->expectsJson()
+        );
+
+        // ...and always answer unauthenticated requests with a JSON 401 (this backend is
+        // API-only; there is no web login page to redirect to).
+        $exceptions->render(
+            fn (\Illuminate\Auth\AuthenticationException $e) => response()->json(['message' => $e->getMessage()], 401)
+        );
     })->create();
