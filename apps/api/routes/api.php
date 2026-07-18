@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Api\ApiKeyController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\DeploymentController;
+use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\SystemController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -33,22 +35,30 @@ Route::prefix('v1')->group(function () {
             Route::get('/api-keys', [ApiKeyController::class, 'index']);
             Route::post('/api-keys', [ApiKeyController::class, 'store']);
             Route::delete('/api-keys/{apiKey}', [ApiKeyController::class, 'destroy']);
+
+            Route::get('/projects', [ProjectController::class, 'index']);
+            Route::post('/projects', [ProjectController::class, 'store']);
+            Route::get('/projects/{project}', [ProjectController::class, 'show']);
         });
     });
 
     // ── CI-facing (API key) ───────────────────────────────────────────────
-    // Lets CI verify a token and see its scopes/project binding.
-    Route::middleware('apikey')->get('/whoami', function (Request $request) {
-        $apiKey = $request->attributes->get('api_key');
+    Route::middleware('apikey')->group(function () {
+        // Lets CI verify a token and see its scopes/project binding.
+        Route::get('/whoami', function (Request $request) {
+            $apiKey = $request->attributes->get('api_key');
 
-        return response()->json(['data' => [
-            'name' => $apiKey->name,
-            'scopes' => $apiKey->scopes ?? [],
-            'project_id' => $apiKey->project_id,
-        ]]);
+            return response()->json(['data' => [
+                'name' => $apiKey->name,
+                'scopes' => $apiKey->scopes ?? [],
+                'project_id' => $apiKey->project_id,
+            ]]);
+        });
+
+        Route::middleware('scope:deploy')
+            ->post('/projects/{project}/deployments', [DeploymentController::class, 'store']);
+
+        Route::middleware('scope:read')
+            ->get('/projects/{project}/deployments/{deployment}', [DeploymentController::class, 'show']);
     });
-
-    // Phase 1 deploy endpoints will sit behind ['apikey', 'scope:deploy'] etc.
-    // Route::middleware(['apikey', 'scope:deploy'])
-    //     ->post('/projects/{project}/deployments', [DeploymentController::class, 'store']);
 });
