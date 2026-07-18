@@ -44,6 +44,13 @@ class RollbackController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        app(\App\Domain\Audit\AuditLogger::class)->record(
+            'deployment.rolled_back',
+            $deployment,
+            ['project' => $project->slug, 'release_id' => $deployment->release_id],
+            $apiKey?->name,
+        );
+
         return response()->json(['data' => $deployment->load('release')]);
     }
 }

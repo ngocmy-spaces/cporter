@@ -40,6 +40,11 @@ class ApiKeyController extends Controller
             isset($data['expires_at']) ? new \DateTimeImmutable($data['expires_at']) : null,
         );
 
+        app(\App\Domain\Audit\AuditLogger::class)->record('apikey.created', $result['api_key'], [
+            'name' => $result['api_key']->name,
+            'scopes' => $result['api_key']->scopes,
+        ]);
+
         return response()->json([
             'data' => $result['api_key'],
             'token' => $result['token'], // shown once — store it now
@@ -49,6 +54,8 @@ class ApiKeyController extends Controller
     public function destroy(ApiKey $apiKey): JsonResponse
     {
         $apiKey->forceFill(['revoked_at' => now()])->save();
+
+        app(\App\Domain\Audit\AuditLogger::class)->record('apikey.revoked', $apiKey, ['name' => $apiKey->name]);
 
         return response()->json(['data' => true]);
     }

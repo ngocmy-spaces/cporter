@@ -41,6 +41,13 @@ class ReleaseController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
+        app(\App\Domain\Audit\AuditLogger::class)->record(
+            'release.activated',
+            $release,
+            ['project' => $project->slug, 'version' => $release->version],
+            $request->user()?->email,
+        );
+
         return response()->json(['data' => $deployment->load('release')]);
     }
 }

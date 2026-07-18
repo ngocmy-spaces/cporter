@@ -153,6 +153,13 @@ class DeploymentController extends Controller
 
         DeployProjectJob::dispatch($deployment);
 
+        app(\App\Domain\Audit\AuditLogger::class)->record(
+            'deployment.created',
+            $deployment,
+            ['project' => $project->slug, 'version' => $release->version],
+            $apiKey?->name,
+        );
+
         return response()->json(['data' => $deployment->fresh()->load('release')], 202);
     }
 

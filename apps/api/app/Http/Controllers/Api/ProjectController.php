@@ -54,6 +54,8 @@ class ProjectController extends Controller
 
         $project = Project::create($data);
 
+        app(\App\Domain\Audit\AuditLogger::class)->record('project.created', $project, ['slug' => $project->slug]);
+
         return response()->json(['data' => $project], 201);
     }
 

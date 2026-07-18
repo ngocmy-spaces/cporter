@@ -19,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'apikey' => \App\Http\Middleware\AuthenticateApiKey::class,
             'scope' => \App\Http\Middleware\EnsureApiScope::class,
+            'role' => \App\Http\Middleware\EnsureRole::class,
         ]);
 
         // API-only app: never redirect guests to a (non-existent) `login` route.

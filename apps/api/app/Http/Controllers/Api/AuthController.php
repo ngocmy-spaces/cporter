@@ -28,6 +28,8 @@ class AuthController extends Controller
 
         $request->session()->regenerate();
 
+        app(\App\Domain\Audit\AuditLogger::class)->record('auth.login', Auth::user(), [], Auth::user()?->email);
+
         return response()->json(['data' => Auth::user()]);
     }
 

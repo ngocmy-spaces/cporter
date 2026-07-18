@@ -31,6 +31,9 @@ return [
     // Shared secret the cPanel cron uses to authenticate the scheduler tick / job runner.
     'cron_token' => env('CPORTER_CRON_TOKEN'),
 
+    // Secret for verifying inbound CI webhooks (GitHub HMAC / GitLab token) — docs/SPEC.md §12.
+    'webhook_secret' => env('CPORTER_WEBHOOK_SECRET'),
+
     // Artifact limits (defensive; host post_max_size is 256MB — docs/SPEC.md §2.1).
     'artifact' => [
         'max_bytes' => (int) env('CPORTER_ARTIFACT_MAX_BYTES', 256 * 1024 * 1024),
