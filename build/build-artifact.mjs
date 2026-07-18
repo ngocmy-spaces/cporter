@@ -57,7 +57,13 @@ await new Promise((resolvePromise, reject) => {
   archive.glob('**/*', {
     cwd: API,
     dot: true,
-    ignore: ['.env', '.git/**', 'tests/**', 'storage/logs/*', 'storage/framework/cache/*', 'storage/framework/sessions/*', 'storage/framework/views/*'],
+    ignore: [
+      '.env', '.git/**', 'tests/**',
+      'storage/logs/*', 'storage/framework/cache/*', 'storage/framework/sessions/*', 'storage/framework/views/*',
+      // Runtime data (uploaded/staged artifacts, private disk) — never ship in the deploy artifact.
+      // `storage` is a shared symlink on the host anyway (shared_paths), so these dirs come from there.
+      'storage/app/artifacts/**', 'storage/app/private/**', 'storage/app/public/**',
+    ],
   });
   archive.finalize();
 });
