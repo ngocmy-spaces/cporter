@@ -2,25 +2,39 @@
 
 namespace App\Console\Commands;
 
+use App\Domain\Deploy\DeployEngine;
+use App\Enums\DeploymentStatus;
+use App\Models\Deployment;
 use Illuminate\Console\Command;
 
 /**
  * cron-worker entrypoint (docs/SPEC.md §9, §10).
  *
- * Invoked by a standing cPanel cron. Runs in cron's shell context, so it can execute
- * target-app shell commands that web PHP cannot. SKELETON — implemented in Phase 2 (T2.x).
+ * Invoked by a standing cPanel cron. Runs in cron's shell context, so it can execute the
+ * target-app hooks (migrate/cache/queue:restart) that web PHP cannot, then finalizes each
+ * hooks_pending deployment (activate → health → prune / rollback).
  */
 class RunJobs extends Command
 {
-    protected $signature = 'cporter:run-jobs {--max=20 : Max jobs to process this tick}';
+    protected $signature = 'cporter:run-jobs {--max=10 : Max deployments to finalize this tick}';
 
-    protected $description = 'Execute queued shell jobs (deploy hooks: migrate/cache/queue) in cron shell context';
+    protected $description = 'Finalize hooks_pending deployments: run Laravel hooks, activate, health-check';
 
-    public function handle(): int
+    public function handle(DeployEngine $engine): int
     {
-        // TODO (Phase 2): fetch pending jobs, execute in shell, record exit code/output,
-        // re-run health check, auto-rollback on failure.
-        $this->info('cporter:run-jobs — nothing to do (stub).');
+        $pending = Deployment::query()
+            ->where('status', DeploymentStatus::HooksPending->value)
+            ->orderBy('id')
+            ->limit((int) $this->option('max'))
+            ->get();
+
+        foreach ($pending as $deployment) {
+            $this->info("Finalizing deployment #{$deployment->id} (project {$deployment->project_id})…");
+            $result = $engine->finalize($deployment);
+            $this->line("  → {$result->status->value}");
+        }
+
+        $this->info("cporter:run-jobs — processed {$pending->count()} deployment(s).");
 
         return self::SUCCESS;
     }

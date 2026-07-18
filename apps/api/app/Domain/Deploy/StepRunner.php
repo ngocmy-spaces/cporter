@@ -12,9 +12,14 @@ use Throwable;
 class StepRunner
 {
     /** @var list<array<string, mixed>> */
-    private array $steps = [];
+    private array $steps;
 
-    public function __construct(private readonly Deployment $deployment) {}
+    public function __construct(private readonly Deployment $deployment)
+    {
+        // Continue appending to any steps already recorded (e.g. staging steps before the
+        // cron finalize resumes the pipeline).
+        $this->steps = $deployment->steps ?? [];
+    }
 
     /** Run a step; record success/failure (with timing) and re-throw on error. */
     public function run(string $name, callable $fn): void

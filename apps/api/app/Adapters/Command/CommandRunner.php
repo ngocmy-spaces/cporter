@@ -2,23 +2,22 @@
 
 namespace App\Adapters\Command;
 
+use App\Domain\Command\CommandResult;
+
 /**
- * Command execution abstraction (docs/SPEC.md §9).
+ * Executes a target-app shell command (docs/SPEC.md §9).
  *
- * The target host has NO usable exec/proc_open in web PHP, so target-app shell
- * commands (e.g. `php artisan migrate`) are enqueued and executed later by the
- * cron-worker running in cron's shell context. Implementations: CronWorkerRunner
- * (primary), ManualRunner (fallback), and optionally SshRunner.
+ * The target host has NO usable exec/proc_open in web PHP, so this is only ever called
+ * from the cron-worker (`cporter:run-jobs`), which runs in cron's shell context. Web-request
+ * code never calls run() — it stages the release and defers hooks to the cron finalize.
  */
 interface CommandRunner
 {
-    /**
-     * Enqueue a shell command to run in $workingDir; returns a job id to poll.
-     *
-     * @param array<string, string> $env
-     */
-    public function enqueue(string $command, string $workingDir, array $env = []): string;
+    /** Whether shell execution is possible in the current context (proc_open available). */
+    public function isAvailable(): bool;
 
-    /** Driver name: 'cron-worker' | 'manual' | 'ssh' | 'proc_open'. */
-    public function driver(): string;
+    /**
+     * @param  array<string, string>  $env
+     */
+    public function run(string $command, string $workingDir, array $env = [], ?int $timeout = 300): CommandResult;
 }

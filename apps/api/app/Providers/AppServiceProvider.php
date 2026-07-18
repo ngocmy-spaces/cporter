@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Adapters\Command\CommandRunner;
+use App\Adapters\Command\ProcessCommandRunner;
 use App\Adapters\Storage\CpanelFilesystemAdapter;
 use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Storage\PathJail;
@@ -26,6 +28,9 @@ class AppServiceProvider extends ServiceProvider
             (int) config('cporter.artifact.max_uncompressed_bytes', 1024 * 1024 * 1024),
             (int) config('cporter.lock_ttl', 900),
         ));
+
+        // Command execution (cron-worker shell context) — docs/SPEC.md §9.
+        $this->app->bind(CommandRunner::class, ProcessCommandRunner::class);
     }
 
     /**
