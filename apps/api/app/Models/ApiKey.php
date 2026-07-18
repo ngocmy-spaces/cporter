@@ -40,6 +40,7 @@ class ApiKey extends Model
     {
         return [
             'scopes' => 'array',
+            'project_id' => 'integer',
             'last_used_at' => 'datetime',
             'expires_at' => 'datetime',
             'revoked_at' => 'datetime',

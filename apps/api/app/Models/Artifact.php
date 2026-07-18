@@ -35,6 +35,7 @@ class Artifact extends Model
     protected function casts(): array
     {
         return [
+            'project_id' => 'integer',
             'status' => ArtifactStatus::class,
             'size' => 'integer',
             'uploaded_at' => 'datetime',

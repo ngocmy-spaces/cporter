@@ -38,6 +38,8 @@ class Deployment extends Model
     protected function casts(): array
     {
         return [
+            'project_id' => 'integer',
+            'release_id' => 'integer',
             'status' => DeploymentStatus::class,
             'trigger' => DeploymentTrigger::class,
             'steps' => 'array',

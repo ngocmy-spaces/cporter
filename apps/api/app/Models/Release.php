@@ -34,6 +34,8 @@ class Release extends Model
     protected function casts(): array
     {
         return [
+            'project_id' => 'integer',
+            'artifact_id' => 'integer',
             'state' => ReleaseState::class,
             'activated_at' => 'datetime',
         ];
