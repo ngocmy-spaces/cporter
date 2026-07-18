@@ -24,6 +24,7 @@ class AppServiceProvider extends ServiceProvider
             (int) config('cporter.artifact.max_files', 50000),
             (int) config('cporter.artifact.max_bytes', 256 * 1024 * 1024),
             (int) config('cporter.artifact.max_uncompressed_bytes', 1024 * 1024 * 1024),
+            (int) config('cporter.lock_ttl', 900),
         ));
     }
 
