@@ -21,6 +21,7 @@ import { Link } from 'react-router-dom';
 import { IconPlus } from '@tabler/icons-react';
 import axios from 'axios';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import type { ApiEnvelope, Project } from '@/lib/types';
 
 const PROJECT_TYPES = [
@@ -54,6 +55,8 @@ const INITIAL_VALUES: ProjectFormValues = {
 export function ProjectsPage() {
   const [opened, { open, close }] = useDisclosure(false);
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const projects = useQuery({
     queryKey: ['projects'],
@@ -112,9 +115,11 @@ export function ProjectsPage() {
             Managed cPanel targets that cPorter deploys to.
           </Text>
         </div>
-        <Button leftSection={<IconPlus size={16} />} onClick={open}>
-          New project
-        </Button>
+        {isAdmin && (
+          <Button leftSection={<IconPlus size={16} />} onClick={open}>
+            New project
+          </Button>
+        )}
       </Group>
 
       <Paper withBorder radius="md">

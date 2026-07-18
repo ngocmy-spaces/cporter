@@ -2,6 +2,7 @@ import { Alert, Button, Card, Group, List, Loader, SimpleGrid, Stack, Text, Them
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { IconCheck, IconRefresh, IconX } from '@tabler/icons-react';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { formatBytes, formatDateTime } from '@/lib/format';
 import type { Capabilities } from '@/lib/types';
 
@@ -12,6 +13,8 @@ interface CapabilitiesResponse {
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const capabilities = useQuery({
     queryKey: ['system', 'capabilities'],
@@ -47,13 +50,15 @@ export function SettingsPage() {
             Last probed {formatDateTime(capabilities.data?.probed_at)}
           </Text>
         </div>
-        <Button
-          leftSection={<IconRefresh size={16} />}
-          onClick={() => refresh.mutate()}
-          loading={refresh.isPending}
-        >
-          Re-probe
-        </Button>
+        {isAdmin && (
+          <Button
+            leftSection={<IconRefresh size={16} />}
+            onClick={() => refresh.mutate()}
+            loading={refresh.isPending}
+          >
+            Re-probe
+          </Button>
+        )}
       </Group>
 
       <SimpleGrid cols={{ base: 1, sm: 2 }}>

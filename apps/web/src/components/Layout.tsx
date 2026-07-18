@@ -85,7 +85,9 @@ function UserMenu() {
 
 export function Layout() {
   const { pathname } = useLocation();
+  const { user } = useAuth();
   const isActive = (item: NavItem) => (item.end ? pathname === item.to : pathname.startsWith(item.to));
+  const navItems = NAV.filter((item) => item.to !== '/users' || user?.role === 'admin');
 
   return (
     <AppShell header={{ height: 56 }} navbar={{ width: 240, breakpoint: 'sm' }} padding="md">
@@ -108,7 +110,7 @@ export function Layout() {
       </AppShell.Header>
 
       <AppShell.Navbar p="xs">
-        {NAV.map((item) => {
+        {navItems.map((item) => {
           const Icon = item.icon;
           return (
             <NavLink

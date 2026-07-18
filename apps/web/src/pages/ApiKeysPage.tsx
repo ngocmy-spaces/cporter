@@ -25,6 +25,7 @@ import { notifications } from '@mantine/notifications';
 import { IconCheck, IconCopy, IconPlus, IconTrash, IconX } from '@tabler/icons-react';
 import axios from 'axios';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { formatDateTime } from '@/lib/format';
 import type { ApiEnvelope, ApiKey, Project } from '@/lib/types';
 
@@ -43,6 +44,8 @@ export function ApiKeysPage() {
   const [opened, { open, close }] = useDisclosure(false);
   const [newToken, setNewToken] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const apiKeys = useQuery({
     queryKey: ['api-keys'],
@@ -138,9 +141,11 @@ export function ApiKeysPage() {
             Tokens used by CI to deploy and manage projects.
           </Text>
         </div>
-        <Button leftSection={<IconPlus size={16} />} onClick={open}>
-          New key
-        </Button>
+        {isAdmin && (
+          <Button leftSection={<IconPlus size={16} />} onClick={open}>
+            New key
+          </Button>
+        )}
       </Group>
 
       <Paper withBorder radius="md">
@@ -189,7 +194,7 @@ export function ApiKeysPage() {
                         </Badge>
                       </Table.Td>
                       <Table.Td>
-                        {!revoked && (
+                        {!revoked && isAdmin && (
                           <Button
                             size="xs"
                             color="red"

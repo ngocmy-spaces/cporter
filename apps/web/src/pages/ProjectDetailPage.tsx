@@ -20,6 +20,7 @@ import { notifications } from '@mantine/notifications';
 import { IconCheck, IconX } from '@tabler/icons-react';
 import axios from 'axios';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { DeploymentDrawer } from '@/components/DeploymentDrawer';
 import { DeploymentStatusBadge, ReleaseStateBadge } from '@/components/StatusBadge';
 import { formatDateTime, formatRelativeTime } from '@/lib/format';
@@ -29,6 +30,8 @@ export function ProjectDetailPage() {
   const { slug } = useParams<{ slug: string }>();
   const [selectedDeployment, setSelectedDeployment] = useState<number | null>(null);
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const project = useQuery({
     queryKey: ['projects', slug],
@@ -211,7 +214,7 @@ export function ProjectDetailPage() {
                         </Table.Td>
                         <Table.Td>{formatDateTime(r.activated_at)}</Table.Td>
                         <Table.Td>
-                          {r.state !== 'active' && (
+                          {r.state !== 'active' && isAdmin && (
                             <Button size="xs" variant="light" onClick={() => confirmActivate(r)}>
                               Activate
                             </Button>

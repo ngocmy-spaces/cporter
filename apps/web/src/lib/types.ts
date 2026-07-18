@@ -20,10 +20,25 @@ export type ReleaseState = 'pending' | 'extracting' | 'ready' | 'active' | 'supe
 
 export type ApiScope = 'read' | 'deploy' | 'rollback' | 'admin';
 
+export type UserRole = 'admin' | 'viewer';
+
 export interface User {
   id: number;
   name: string;
   email: string;
+  role: UserRole;
+  created_at: string;
+}
+
+export interface AuditLog {
+  id: number;
+  actor: string | null;
+  action: string;
+  subject_type: string | null;
+  subject_id: number | null;
+  meta: Record<string, unknown> | null;
+  ip: string | null;
+  created_at: string;
 }
 
 export interface Artifact {

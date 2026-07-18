@@ -62,12 +62,12 @@ and **spec reference**. Legend: ✅ done · 🔜 next · ⬜ todo · 🔒 blocke
 
 | ID | Task | Status | Deliverable | Spec |
 |----|------|:----:|---|---|
-| **T3.1** | Dashboard widgets | ⬜ | Recent deploys, success rate, alerts (stale lock, migration pending) | §13 |
-| **T3.2** | Users & roles | ⬜ | Admin user CRUD + roles | §13 |
-| **T3.3** | API Keys/Tokens UI | ⬜ | Create/revoke token, assign scope + project, last_used | §12, §13 |
-| **T3.4** | Audit log UI | ⬜ | Filter by project/status/time | §12 |
-| **T3.5** | Housekeeping | ⬜ | Prune releases, timeout cleanup on a schedule | §10 |
-| **T3.6** | Webhooks | ⬜ | `POST /webhooks/{provider}` verify HMAC (GitHub/GitLab) | §7, §12 |
+| **T3.1** | Dashboard widgets | ✅ | Alerts card (failed/in-flight/stuck >10' + "All clear") + rows click → DeploymentDrawer, cạnh 4 stat cards | §13 |
+| **T3.2** | Users & roles | ✅ | `users.role` (admin/viewer) + `role:admin` gate writes; UserController CRUD; UsersPage (create/delete, no self-delete); UI ẩn nút write + menu Users cho viewer | §13 |
+| **T3.3** | API Keys/Tokens UI | ✅ | Đã có từ T1.9 (create token-once, scopes MultiSelect, project, last_used, revoke) | §12, §13 |
+| **T3.4** | Audit log UI | ✅ | `AuditLogger` ghi 9 action + `GET /audit-logs`; LogsPage = bảng audit (action/actor/subject/meta/ip/when) + filter action, poll 15s | §12 |
+| **T3.5** | Housekeeping | ✅ | Đã có từ T2.5 (`cporter:housekeep`: fail timeout + nhả lock treo, theo lịch) | §10 |
+| **T3.6** | Webhooks | ✅ | `POST /webhooks/{github\|gitlab}` verify HMAC/token + ghi audit (env `CPORTER_WEBHOOK_SECRET`); cấu hình qua env, không cần UI | §7, §12 |
 
 ---
 

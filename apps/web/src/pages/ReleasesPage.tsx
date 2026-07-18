@@ -6,6 +6,7 @@ import { notifications } from '@mantine/notifications';
 import { IconCheck, IconX } from '@tabler/icons-react';
 import axios from 'axios';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { ReleaseStateBadge } from '@/components/StatusBadge';
 import { formatDateTime } from '@/lib/format';
 import type { ApiEnvelope, Project, Release } from '@/lib/types';
@@ -13,6 +14,8 @@ import type { ApiEnvelope, Project, Release } from '@/lib/types';
 export function ReleasesPage() {
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const projects = useQuery({
     queryKey: ['projects'],
@@ -115,7 +118,7 @@ export function ReleasesPage() {
                     </Table.Td>
                     <Table.Td>{formatDateTime(r.activated_at)}</Table.Td>
                     <Table.Td>
-                      {r.state !== 'active' && (
+                      {r.state !== 'active' && isAdmin && (
                         <Button size="xs" variant="light" onClick={() => confirmActivate(r)}>
                           Activate
                         </Button>
