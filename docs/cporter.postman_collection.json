@@ -1,0 +1,174 @@
+{
+  "info": {
+    "name": "cPorter (local)",
+    "description": "cPorter API — local Docker stack (http://localhost:8000).\n\nTwo auth models:\n- CI (API key): Authorization: Bearer cpk_...  — no CSRF, ideal for Postman (deploy/rollback).\n- Admin (session): cookie + X-XSRF-TOKEN — the 'Admin' folder handles CSRF via a pre-request script.\n\nQuick start:\n1. Admin ▸ 1. CSRF, then 2. Login, then 3. Create project, then 4. Create API key\n   (saves {{token}} automatically).\n2. Set {{sha256}} = sha256 of your zip:  sha256sum yourapp.zip\n3. CI ▸ Create deployment (pick the zip file in the 'artifact' field) → 202, saves {{deploymentId}}.\n4. CI ▸ Get deployment → poll until status=success. Deploys are processed by the worker within ~1 min\n   (or run: docker compose exec api php artisan queue:work --stop-when-empty).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000/api/v1" },
+    { "key": "slug", "value": "demo" },
+    { "key": "token", "value": "" },
+    { "key": "sha256", "value": "" },
+    { "key": "deploymentId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "CI (API key)",
+      "item": [
+        {
+          "name": "Whoami",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{baseUrl}}/whoami"
+          }
+        },
+        {
+          "name": "Create deployment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.data && j.data.id) { pm.collectionVariables.set('deploymentId', j.data.id); }",
+                  "pm.test('accepted', () => pm.expect([200,202]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "artifact", "type": "file", "src": null, "description": "Select your .zip artifact" },
+                { "key": "sha256", "value": "{{sha256}}", "type": "text", "description": "sha256sum of the zip" },
+                { "key": "version", "value": "1.0.0", "type": "text" }
+              ]
+            },
+            "url": "{{baseUrl}}/projects/{{slug}}/deployments"
+          }
+        },
+        {
+          "name": "Get deployment (poll)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{baseUrl}}/projects/{{slug}}/deployments/{{deploymentId}}"
+          }
+        },
+        {
+          "name": "Rollback",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/projects/{{slug}}/rollback"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin (session)",
+      "description": "Run in order: 1 → 2 → 3 → 4. The folder pre-request script copies the XSRF-TOKEN cookie into the X-XSRF-TOKEN header for state-changing calls.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const jar = pm.cookies.jar();",
+              "jar.get('localhost', 'XSRF-TOKEN', (err, value) => {",
+              "  if (!err && value) {",
+              "    pm.request.headers.upsert({ key: 'X-XSRF-TOKEN', value: decodeURIComponent(value) });",
+              "  }",
+              "});"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "1. CSRF cookie",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/csrf"
+          }
+        },
+        {
+          "name": "2. Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"admin@cporter.local\",\n  \"password\": \"password\"\n}" },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "3. Create project",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Demo\",\n  \"base_path\": \"/srv/sites/demo\",\n  \"type\": \"static\"\n}" },
+            "url": "{{baseUrl}}/projects"
+          }
+        },
+        {
+          "name": "4. Create API key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.token) { pm.collectionVariables.set('token', j.token); console.log('Saved token to {{token}}'); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"ci\",\n  \"scopes\": [\"deploy\", \"read\", \"rollback\"]\n}" },
+            "url": "{{baseUrl}}/api-keys"
+          }
+        }
+      ]
+    }
+  ]
+}
