@@ -50,6 +50,11 @@ class ProjectController extends Controller
             ]);
         }
 
+        // Ensure the (jail-validated) base directory exists so the first deploy can lock/extract.
+        if (! is_dir($data['base_path'])) {
+            @mkdir($data['base_path'], 0775, true);
+        }
+
         $data['slug'] = $this->uniqueSlug($data['slug'] ?? Str::slug($data['name']));
 
         $project = Project::create($data);

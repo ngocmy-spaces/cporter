@@ -54,6 +54,20 @@ php artisan serve            # http://localhost:8000
 pnpm build:artifact          # → build/out/cporter-<version>.zip + prints sha256
 ```
 
+## Local testing with Docker Compose
+
+Full stack (PHP 8.3 to mirror cPanel + MySQL 8 + Vite dev + cron worker):
+
+```bash
+docker compose up --build          # first run installs composer + pnpm deps (slow)
+# open http://localhost:5173  →  log in: admin@cporter.local / password
+```
+
+Services: `web` (Vite :5173, proxies /api → api), `api` (Laravel :8000), `worker`
+(`schedule:work` — runs Laravel deploy hooks/queue/housekeep), `db` (MySQL, :3307 on host).
+Managed sites live in the shared `sites` volume — create projects with **`base_path=/srv/sites/<name>`**
+(the dir is auto-created; jail = `/srv/sites`). Tear down with `docker compose down` (add `-v` to wipe data).
+
 ## cPanel cron (required for Laravel deploys + housekeeping)
 
 Web PHP can't run shell commands, so a single cPanel cron drives the cron-worker (runs

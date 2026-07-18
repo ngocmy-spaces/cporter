@@ -1,0 +1,108 @@
+# cPorter — local full-stack test environment.
+#   docker compose up --build      # first run: installs composer + pnpm deps (slow)
+#   open http://localhost:5173     # admin@cporter.local / password
+#
+# api/worker run PHP 8.3 to mirror the cPanel target. Managed "sites" live in the shared
+# `sites` volume (jail root /srv/sites) so create projects with base_path=/srv/sites/<name>.
+
+x-api-env: &api-env
+  APP_NAME: cPorter
+  APP_ENV: local
+  APP_KEY: base64:1izP2WDiVdpjnpPB2UV8e8ZKZ+sr7/GOJdvkQpJ+IUE=
+  APP_DEBUG: "true"
+  APP_URL: http://localhost:8000
+  LOG_CHANNEL: stderr
+  DB_CONNECTION: mysql
+  DB_HOST: db
+  DB_PORT: "3306"
+  DB_DATABASE: cporter
+  DB_USERNAME: cporter
+  DB_PASSWORD: secret
+  SESSION_DRIVER: database
+  CACHE_STORE: database
+  QUEUE_CONNECTION: database
+  CPORTER_ALLOWED_BASE_PATHS: /srv/sites
+  CPORTER_COMMAND_DRIVER: cron-worker
+  CPORTER_ADMIN_EMAIL: admin@cporter.local
+  CPORTER_ADMIN_PASSWORD: password
+
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: cporter
+      MYSQL_USER: cporter
+      MYSQL_PASSWORD: secret
+      MYSQL_ROOT_PASSWORD: secret
+    ports:
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-psecret"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    environment:
+      <<: *api-env
+    volumes:
+      - ./apps/api:/app
+      - api_vendor:/app/vendor
+      - sites:/srv/sites
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8000/api/v1/health') ? 0 : 1);"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 180s
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    environment:
+      <<: *api-env
+      CPORTER_ROLE: worker
+    volumes:
+      - ./apps/api:/app
+      - api_vendor:/app/vendor
+      - sites:/srv/sites
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    image: node:22-bookworm-slim
+    working_dir: /app
+    environment:
+      VITE_API_PROXY_TARGET: http://api:8000
+    command: >
+      sh -c "corepack enable &&
+             corepack prepare pnpm@11.12.0 --activate &&
+             pnpm install &&
+             pnpm --filter @cporter/web dev --host 0.0.0.0"
+    volumes:
+      - ./:/app
+      - web_root_modules:/app/node_modules
+      - web_app_modules:/app/apps/web/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  db_data:
+  api_vendor:
+  sites:
+  web_root_modules:
+  web_app_modules:
