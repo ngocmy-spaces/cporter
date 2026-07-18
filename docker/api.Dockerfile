@@ -6,6 +6,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && docker-php-ext-install pdo_mysql zip mbstring bcmath \
     && rm -rf /var/lib/apt/lists/*
 
+# PHP limits — mirror the cPanel target (large artifact uploads; docs/SPEC.md §2.1).
+RUN { \
+        echo "upload_max_filesize=512M"; \
+        echo "post_max_size=300M"; \
+        echo "memory_limit=512M"; \
+        echo "max_execution_time=300"; \
+    } > /usr/local/etc/php/conf.d/cporter.ini
+
 # Composer
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 
