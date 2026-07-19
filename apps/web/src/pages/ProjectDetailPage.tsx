@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
+  ActionIcon,
   Anchor,
   Badge,
   Breadcrumbs,
@@ -10,34 +11,89 @@ import {
   Drawer,
   Group,
   Loader,
+  Modal,
+  NumberInput,
   Paper,
+  Select,
   SimpleGrid,
   Stack,
   Table,
   Tabs,
   Text,
+  TextInput,
   Title,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
+import { useForm } from '@mantine/form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconExternalLink, IconFolders, IconRefresh, IconX } from '@tabler/icons-react';
+import {
+  IconCheck,
+  IconExternalLink,
+  IconFolders,
+  IconPencil,
+  IconPlus,
+  IconRefresh,
+  IconTrash,
+  IconX,
+} from '@tabler/icons-react';
 import axios from 'axios';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { DeploymentDrawer } from '@/components/DeploymentDrawer';
 import { DeploymentStatusBadge, ReleaseStateBadge } from '@/components/StatusBadge';
 import { formatBytes, formatDateTime, formatRelativeTime } from '@/lib/format';
-import type { ApiEnvelope, Deployment, Project, Release } from '@/lib/types';
+import type { ApiEnvelope, Deployment, Project, ProjectStatus, Release, SharedPath } from '@/lib/types';
+
+const PROJECT_TYPES = [
+  { value: 'static', label: 'Static' },
+  { value: 'laravel', label: 'Laravel' },
+  { value: 'php', label: 'PHP' },
+  { value: 'node', label: 'Node' },
+  { value: 'wordpress', label: 'WordPress' },
+];
+
+const SHARED_PATH_TYPES = [
+  { value: 'dir', label: 'Directory' },
+  { value: 'file', label: 'File' },
+];
+
+interface ProjectEditFormValues {
+  name: string;
+  type: string;
+  docroot_subpath: string;
+  php_binary: string;
+  keep_releases: number;
+  health_check_url: string;
+  shared_paths: SharedPath[];
+}
+
+const EDIT_INITIAL_VALUES: ProjectEditFormValues = {
+  name: '',
+  type: 'static',
+  docroot_subpath: '',
+  php_binary: '',
+  keep_releases: 5,
+  health_check_url: '',
+  shared_paths: [],
+};
 
 export function ProjectDetailPage() {
   const { slug } = useParams<{ slug: string }>();
   const [selectedDeployment, setSelectedDeployment] = useState<number | null>(null);
   const [sharedOpened, { open: openShared, close: closeShared }] = useDisclosure(false);
+  const [editOpened, { open: openEditDisclosure, close: closeEditDisclosure }] = useDisclosure(false);
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+
+  const editForm = useForm<ProjectEditFormValues>({
+    initialValues: EDIT_INITIAL_VALUES,
+    validate: {
+      name: (value) => (value.trim().length > 0 ? null : 'Name is required'),
+    },
+  });
 
   const project = useQuery({
     queryKey: ['projects', slug],
@@ -123,6 +179,78 @@ export function ProjectDetailPage() {
     });
   };
 
+  const closeEditModal = () => {
+    closeEditDisclosure();
+    editForm.reset();
+  };
+
+  const editProject = useMutation({
+    mutationFn: async (values: ProjectEditFormValues) => {
+      const payload = {
+        name: values.name,
+        type: values.type,
+        docroot_subpath: values.docroot_subpath || null,
+        php_binary: values.php_binary || null,
+        keep_releases: values.keep_releases,
+        health_check_url: values.health_check_url || null,
+        shared_paths: values.shared_paths
+          .map((entry) => ({ path: entry.path.trim(), type: entry.type }))
+          .filter((entry) => entry.path.length > 0),
+      };
+      return (await api.patch<ApiEnvelope<Project>>(`/projects/${slug}`, payload)).data.data;
+    },
+    onSuccess: () => {
+      notifications.show({
+        color: 'green',
+        title: 'Project updated',
+        message: 'Changes were saved.',
+        icon: <IconCheck size={16} />,
+      });
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['projects', slug] });
+      closeEditModal();
+    },
+    onError: (error) => {
+      if (axios.isAxiosError(error) && error.response?.status === 422) {
+        const errors = error.response.data?.errors as Record<string, string[]> | undefined;
+        if (errors) {
+          editForm.setErrors(
+            Object.fromEntries(Object.entries(errors).map(([field, messages]) => [field, messages[0]])),
+          );
+        }
+      }
+    },
+  });
+
+  const toggleStatus = useMutation({
+    mutationFn: async (status: ProjectStatus) =>
+      (await api.patch<ApiEnvelope<Project>>(`/projects/${slug}`, { status })).data.data,
+    onSuccess: (updated) => {
+      notifications.show({
+        color: 'green',
+        title: updated.status === 'active' ? 'Project enabled' : 'Project disabled',
+        message:
+          updated.status === 'active'
+            ? 'Deploys are re-enabled for this project.'
+            : 'Deploys are now blocked for this project.',
+        icon: <IconCheck size={16} />,
+      });
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['projects', slug] });
+    },
+    onError: (error) => {
+      const message = axios.isAxiosError(error)
+        ? (error.response?.data as { error?: string } | undefined)?.error
+        : undefined;
+      notifications.show({
+        color: 'red',
+        title: 'Status change failed',
+        message: message ?? 'Something went wrong.',
+        icon: <IconX size={16} />,
+      });
+    },
+  });
+
   if (project.isLoading) {
     return (
       <Group justify="center" p="xl">
@@ -144,6 +272,37 @@ export function ProjectDetailPage() {
   const activeRelease = releaseList.find((r) => r.state === 'active') ?? null;
   const lastDeployment = (deployments.data ?? [])[0] ?? null;
   const diskBusy = p.disk_usage_status === 'running' || recomputeDisk.isPending;
+
+  const openEditModal = () => {
+    editForm.reset();
+    editForm.setValues({
+      name: p.name,
+      type: p.type,
+      docroot_subpath: p.docroot_subpath ?? '',
+      php_binary: p.php_binary ?? '',
+      keep_releases: p.keep_releases,
+      health_check_url: p.health_check_url ?? '',
+      shared_paths: p.shared_paths ?? [],
+    });
+    openEditDisclosure();
+  };
+
+  const confirmToggleStatus = () => {
+    const nextStatus: ProjectStatus = p.status === 'active' ? 'disabled' : 'active';
+    modals.openConfirmModal({
+      title: nextStatus === 'disabled' ? 'Disable project' : 'Enable project',
+      children: (
+        <Text size="sm">
+          {nextStatus === 'disabled'
+            ? 'Disabling stops cPorter from accepting new deploys for this project until re-enabled.'
+            : 'Re-enable deploys for this project?'}
+        </Text>
+      ),
+      labels: { confirm: nextStatus === 'disabled' ? 'Disable' : 'Enable', cancel: 'Cancel' },
+      confirmProps: { color: nextStatus === 'disabled' ? 'red' : 'green' },
+      onConfirm: () => toggleStatus.mutate(nextStatus),
+    });
+  };
 
   return (
     <Stack gap="lg">
@@ -174,6 +333,26 @@ export function ProjectDetailPage() {
           <Badge color={p.status === 'active' ? 'green' : 'gray'} variant="light">
             {p.status}
           </Badge>
+          {isAdmin && (
+            <Button
+              variant="light"
+              size="xs"
+              leftSection={<IconPencil size={14} />}
+              onClick={openEditModal}
+            >
+              Edit
+            </Button>
+          )}
+          {isAdmin && (
+            <Button
+              variant="light"
+              size="xs"
+              color={p.status === 'active' ? 'red' : 'green'}
+              onClick={confirmToggleStatus}
+            >
+              {p.status === 'active' ? 'Disable' : 'Enable'}
+            </Button>
+          )}
         </Group>
       </Group>
 
@@ -409,6 +588,104 @@ export function ProjectDetailPage() {
           </Text>
         )}
       </Drawer>
+
+      <Modal opened={editOpened} onClose={closeEditModal} title="Edit project" size="lg">
+        <form onSubmit={editForm.onSubmit((values) => editProject.mutate(values))}>
+          <Stack gap="sm">
+            <TextInput label="Name" placeholder="My App" required {...editForm.getInputProps('name')} />
+            <Select
+              label="Type"
+              description={
+                releaseList.length > 0
+                  ? 'Frozen once the project has releases.'
+                  : 'Static, PHP & WordPress deploy fully in web PHP (no shell). Laravel & Node also run shell steps (migrate, build, restart) via the cron worker.'
+              }
+              data={PROJECT_TYPES}
+              required
+              disabled={releaseList.length > 0}
+              {...editForm.getInputProps('type')}
+            />
+            <TextInput
+              label="Docroot subpath"
+              placeholder="public"
+              description={
+                <>
+                  Subfolder inside the release that becomes the web root. Leave empty to serve the
+                  release root; Laravel typically uses <Code>public</Code>.
+                </>
+              }
+              {...editForm.getInputProps('docroot_subpath')}
+            />
+            <TextInput
+              label="PHP binary"
+              placeholder="/usr/bin/php8.2"
+              description="Override the PHP binary used for shell steps (migrate, artisan, npm build). Leave empty to use the server default."
+              {...editForm.getInputProps('php_binary')}
+            />
+            <NumberInput
+              label="Keep releases"
+              description="How many past releases to retain for rollback before older ones are pruned."
+              min={1}
+              max={50}
+              {...editForm.getInputProps('keep_releases')}
+            />
+            <TextInput
+              label="Health check URL"
+              placeholder="https://example.com/health"
+              description="Polled after each activation; if it fails, cPorter auto-rolls back to the previous release. Leave empty to skip."
+              {...editForm.getInputProps('health_check_url')}
+            />
+            <Stack gap="xs">
+              <Text size="sm" fw={500}>
+                Shared paths
+              </Text>
+              <Text size="xs" c="dimmed">
+                Persisted across releases via symlink. <b>Directory</b> is created automatically if
+                missing (e.g. <code>storage</code>); <b>File</b> must already exist under{' '}
+                <code>shared/</code> on the server (e.g. a secret <code>.env</code>).
+              </Text>
+              {editForm.values.shared_paths.map((_, index) => (
+                <Group key={index} gap="xs" align="flex-start">
+                  <TextInput
+                    placeholder="storage or .env"
+                    style={{ flex: 1 }}
+                    {...editForm.getInputProps(`shared_paths.${index}.path`)}
+                  />
+                  <Select
+                    data={SHARED_PATH_TYPES}
+                    w={130}
+                    {...editForm.getInputProps(`shared_paths.${index}.type`)}
+                  />
+                  <ActionIcon
+                    color="red"
+                    variant="subtle"
+                    onClick={() => editForm.removeListItem('shared_paths', index)}
+                    aria-label="Remove shared path"
+                  >
+                    <IconTrash size={16} />
+                  </ActionIcon>
+                </Group>
+              ))}
+              <Button
+                variant="subtle"
+                size="xs"
+                leftSection={<IconPlus size={14} />}
+                onClick={() => editForm.insertListItem('shared_paths', { path: '', type: 'dir' })}
+              >
+                Add shared path
+              </Button>
+            </Stack>
+            <Group justify="flex-end" mt="md">
+              <Button variant="default" onClick={closeEditModal}>
+                Cancel
+              </Button>
+              <Button type="submit" loading={editProject.isPending}>
+                Save
+              </Button>
+            </Group>
+          </Stack>
+        </form>
+      </Modal>
     </Stack>
   );
 }

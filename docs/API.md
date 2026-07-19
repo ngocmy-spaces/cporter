@@ -67,6 +67,7 @@ Create + run a deployment from a **single-request** upload.
 - **Headers:** `Idempotency-Key` (optional; see §6).
 - **Returns:** `202 Accepted` with `{ "data": <Deployment> }`. Poll the deployment for progress.
   > ⚠️ No `Location` header is set on the 202 (SPEC §7 mentions one; not implemented). Poll via the id in `data`.
+  > A **disabled** project (`status: disabled`) rejects new deploys with `409 Conflict` (also on the chunked `uploads` init/complete).
 
 ### Chunked upload — scope: `deploy`
 For artifacts larger than a single request. Three steps, **all project-nested**:
@@ -109,6 +110,7 @@ Used only by the SPA. **Not reachable with an API key** (session guard). Listed 
 | GET/POST/DELETE | `/api-keys` · `/api-keys/{id}` | read / admin | token CRUD (plaintext shown once) |
 | GET | `/projects` · `/projects/{slug}` | read | list / show projects |
 | POST | `/projects` | admin | create a project (jail-validated `base_path`) |
+| PATCH | `/projects/{slug}` | admin | update project config; `status: disabled` blocks new deploys. `slug`/`base_path`/`type` are frozen once releases exist |
 | GET | `/projects/{slug}/deployments` · `/projects/{slug}/releases` | read | per-project history |
 | GET | `/deployments` · `/deployments/{id}` | read | recent + detail |
 | POST | `/releases/{id}/activate` | admin | activate a release (rollback-from-UI) |

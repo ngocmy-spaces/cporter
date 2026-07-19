@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Domain\Audit\AuditLogger;
 use App\Domain\Storage\PathJail;
+use App\Enums\ProjectStatus;
 use App\Enums\ProjectType;
 use App\Http\Controllers\Controller;
 use App\Jobs\RecomputeDiskUsageJob;
@@ -83,9 +85,67 @@ class ProjectController extends Controller
 
         $project = Project::create($data);
 
-        app(\App\Domain\Audit\AuditLogger::class)->record('project.created', $project, ['slug' => $project->slug]);
+        app(AuditLogger::class)->record('project.created', $project, ['slug' => $project->slug]);
 
         return response()->json(['data' => $project], 201);
+    }
+
+    /**
+     * Partial update of a project's config (docs/SPEC.md §5). PATCH semantics: only the
+     * fields present in the request are validated and applied. `status` doubles as the
+     * enable/disable toggle — a `disabled` project rejects new deploys (DeploymentController).
+     *
+     * Identity/location fields (`slug`, `base_path`, `type`) are frozen once physical releases
+     * exist, since `releases/` and the `current` symlink are anchored to them (docs/SPEC.md §20.5).
+     */
+    public function update(Request $request, Project $project, PathJail $jail): JsonResponse
+    {
+        $data = $request->validate([
+            'name' => ['sometimes', 'required', 'string', 'max:255'],
+            'slug' => ['sometimes', 'required', 'string', 'alpha_dash', 'max:255', Rule::unique('projects', 'slug')->ignore($project->id)],
+            'base_path' => ['sometimes', 'required', 'string', 'max:1024'],
+            'type' => ['sometimes', 'required', Rule::enum(ProjectType::class)],
+            'docroot_subpath' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'php_binary' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'keep_releases' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:50'],
+            'health_check_url' => ['sometimes', 'nullable', 'url'],
+            'shared_paths' => ['sometimes', 'array'],
+            'shared_paths.*' => [$this->sharedPathRule()],
+            'hooks' => ['sometimes', 'nullable', 'array'],
+            'status' => ['sometimes', Rule::enum(ProjectStatus::class)],
+        ]);
+
+        if ($project->releases()->exists()) {
+            foreach (['slug', 'base_path', 'type'] as $field) {
+                if (array_key_exists($field, $data) && (string) $data[$field] !== (string) $project->getRawOriginal($field)) {
+                    throw ValidationException::withMessages([
+                        $field => "Cannot change {$field} once the project has releases.",
+                    ]);
+                }
+            }
+        }
+
+        if (array_key_exists('base_path', $data)) {
+            if (! $jail->isInside($data['base_path'])) {
+                throw ValidationException::withMessages([
+                    'base_path' => 'base_path must be within an allowed base path (CPORTER_ALLOWED_BASE_PATHS).',
+                ]);
+            }
+            if (! is_dir($data['base_path'])) {
+                @mkdir($data['base_path'], 0775, true);
+            }
+        }
+
+        $project->fill($data);
+        $changed = array_keys($project->getDirty());
+        $project->save();
+
+        app(AuditLogger::class)->record('project.updated', $project, [
+            'slug' => $project->slug,
+            'changed' => $changed,
+        ]);
+
+        return response()->json(['data' => $project->fresh()]);
     }
 
     /**

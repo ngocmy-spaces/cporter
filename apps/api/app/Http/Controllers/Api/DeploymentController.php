@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Adapters\Storage\StorageAdapter;
+use App\Domain\Audit\AuditLogger;
 use App\Domain\Deploy\ArtifactUploadService;
 use App\Enums\ArtifactStatus;
 use App\Enums\DeploymentStatus;
 use App\Enums\DeploymentTrigger;
+use App\Enums\ProjectStatus;
 use App\Enums\ReleaseState;
 use App\Http\Controllers\Controller;
 use App\Jobs\DeployProjectJob;
@@ -32,6 +34,9 @@ class DeploymentController extends Controller
     {
         if ($denied = $this->guardProjectScope($request, $project)) {
             return $denied;
+        }
+        if ($disabled = $this->guardProjectEnabled($project)) {
+            return $disabled;
         }
         if ($replay = $this->idempotentReplay($request, $project)) {
             return $replay;
@@ -60,6 +65,9 @@ class DeploymentController extends Controller
         if ($denied = $this->guardProjectScope($request, $project)) {
             return $denied;
         }
+        if ($disabled = $this->guardProjectEnabled($project)) {
+            return $disabled;
+        }
 
         return response()->json(['data' => ['upload_id' => $this->uploads->init()]], 201);
     }
@@ -84,6 +92,9 @@ class DeploymentController extends Controller
     {
         if ($denied = $this->guardProjectScope($request, $project)) {
             return $denied;
+        }
+        if ($disabled = $this->guardProjectEnabled($project)) {
+            return $disabled;
         }
         if ($replay = $this->idempotentReplay($request, $project)) {
             return $replay;
@@ -153,7 +164,7 @@ class DeploymentController extends Controller
 
         DeployProjectJob::dispatch($deployment);
 
-        app(\App\Domain\Audit\AuditLogger::class)->record(
+        app(AuditLogger::class)->record(
             'deployment.created',
             $deployment,
             ['project' => $project->slug, 'version' => $release->version],
@@ -219,6 +230,16 @@ class DeploymentController extends Controller
         $apiKey = $request->attributes->get('api_key');
         if ($apiKey?->project_id !== null && $apiKey->project_id !== $project->id) {
             return response()->json(['error' => 'API key is not authorized for this project.'], 403);
+        }
+
+        return null;
+    }
+
+    /** A disabled project (docs/SPEC.md §5) rejects new deploys until it is re-enabled. */
+    private function guardProjectEnabled(Project $project): ?JsonResponse
+    {
+        if ($project->status === ProjectStatus::Disabled) {
+            return response()->json(['error' => 'Project is disabled; deploys are not accepted.'], 409);
         }
 
         return null;

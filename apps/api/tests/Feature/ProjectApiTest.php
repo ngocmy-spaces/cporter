@@ -102,3 +102,58 @@ it('requires admin auth to manage projects', function () {
         'name' => 'x', 'base_path' => $this->base, 'type' => 'static',
     ])->assertUnauthorized();
 });
+
+it('updates editable project fields', function () {
+    $project = Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base, 'keep_releases' => 5]);
+
+    $this->actingAs($this->admin)->patchJson('/api/v1/projects/shop', [
+        'name' => 'Shop Renamed',
+        'keep_releases' => 12,
+        'health_check_url' => 'https://shop.example.com/health',
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.name', 'Shop Renamed')
+        ->assertJsonPath('data.keep_releases', 12)
+        ->assertJsonPath('data.health_check_url', 'https://shop.example.com/health');
+});
+
+it('toggles a project between active and disabled', function () {
+    Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base]);
+
+    $this->actingAs($this->admin)->patchJson('/api/v1/projects/shop', ['status' => 'disabled'])
+        ->assertOk()
+        ->assertJsonPath('data.status', 'disabled');
+
+    $this->actingAs($this->admin)->patchJson('/api/v1/projects/shop', ['status' => 'active'])
+        ->assertOk()
+        ->assertJsonPath('data.status', 'active');
+});
+
+it('freezes slug, base_path and type once the project has releases', function () {
+    $project = Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base, 'type' => 'static']);
+    $project->releases()->create(['version' => '1.0.0', 'path' => $this->base.'/releases/1', 'state' => 'active']);
+
+    // Frozen identity field is rejected…
+    $this->actingAs($this->admin)->patchJson('/api/v1/projects/shop', ['type' => 'laravel'])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('type');
+
+    // …but ordinary config still updates.
+    $this->actingAs($this->admin)->patchJson('/api/v1/projects/shop', ['keep_releases' => 9])
+        ->assertOk()
+        ->assertJsonPath('data.keep_releases', 9);
+});
+
+it('allows changing type before any release exists', function () {
+    Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base, 'type' => 'static']);
+
+    $this->actingAs($this->admin)->patchJson('/api/v1/projects/shop', ['type' => 'laravel'])
+        ->assertOk()
+        ->assertJsonPath('data.type', 'laravel');
+});
+
+it('requires admin auth to update a project', function () {
+    Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base]);
+
+    $this->patchJson('/api/v1/projects/shop', ['name' => 'x'])->assertUnauthorized();
+});

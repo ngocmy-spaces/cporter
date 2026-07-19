@@ -56,6 +56,19 @@ afterEach(function () {
     File::deleteDirectory(storage_path('app/artifacts/demo'));
 });
 
+it('rejects a deploy to a disabled project', function () {
+    $this->project->update(['status' => 'disabled']);
+
+    $zip = buildZip(['index.html' => '<h1>cPorter</h1>']);
+
+    $this->withToken($this->token)->post('/api/v1/projects/demo/deployments', [
+        'artifact' => upload($zip),
+        'sha256' => hash_file('sha256', $zip),
+    ])->assertStatus(409);
+
+    expect(is_link($this->base.'/current'))->toBeFalse();
+});
+
 it('deploys a static artifact end to end', function () {
     $zip = buildZip(['index.html' => '<h1>cPorter</h1>']);
 
