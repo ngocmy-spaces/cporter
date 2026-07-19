@@ -1,10 +1,10 @@
-import { Alert, Button, Card, Group, List, Loader, SimpleGrid, Stack, Text, ThemeIcon, Title } from '@mantine/core';
+import { Alert, Badge, Button, Card, Group, List, Loader, SimpleGrid, Stack, Text, ThemeIcon, Title } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { IconCheck, IconRefresh, IconX } from '@tabler/icons-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { formatBytes, formatDateTime } from '@/lib/format';
-import type { Capabilities } from '@/lib/types';
+import { formatBytes, formatDateTime, formatRelativeTime } from '@/lib/format';
+import type { Capabilities, CronStatus } from '@/lib/types';
 
 interface CapabilitiesResponse {
   data: Capabilities;
@@ -19,6 +19,12 @@ export function SettingsPage() {
   const capabilities = useQuery({
     queryKey: ['system', 'capabilities'],
     queryFn: async () => (await api.get<CapabilitiesResponse>('/system/capabilities')).data,
+  });
+
+  const cron = useQuery({
+    queryKey: ['system', 'cron'],
+    queryFn: async () => (await api.get<{ data: CronStatus }>('/system/cron')).data.data,
+    refetchInterval: 30_000, // keep the liveness view fresh
   });
 
   const refresh = useMutation({
@@ -60,6 +66,8 @@ export function SettingsPage() {
           </Button>
         )}
       </Group>
+
+      <CronCard status={cron.data} loading={cron.isLoading} />
 
       <SimpleGrid cols={{ base: 1, sm: 2 }}>
         <Card withBorder radius="md" p="md">
@@ -124,6 +132,54 @@ export function SettingsPage() {
         )}
       </Card>
     </Stack>
+  );
+}
+
+const MODE_LABEL: Record<'A' | 'B', string> = {
+  A: 'A — schedule:run (1-minute cron)',
+  B: 'B — cporter:work (5-minute cron loop)',
+};
+
+function CronCard({ status, loading }: { status: CronStatus | undefined; loading: boolean }) {
+  const meta = {
+    healthy: { color: 'green', label: 'Running' },
+    down: { color: 'red', label: 'Not running' },
+    unknown: { color: 'gray', label: 'Never run' },
+  } as const;
+
+  const state = status?.state ?? 'unknown';
+  const { color, label } = meta[state];
+
+  return (
+    <Card withBorder radius="md" p="md">
+      <Group justify="space-between" mb="xs">
+        <Text fw={600}>Cron / Worker</Text>
+        <Badge color={color} variant="light">
+          {loading ? 'Checking…' : label}
+        </Badge>
+      </Group>
+
+      <Stack gap={4}>
+        <Row label="Mode" value={status?.mode ? MODE_LABEL[status.mode] : '—'} />
+        <Row label="Last beat" value={formatRelativeTime(status?.last_run_at)} />
+        <Row label="Host" value={status?.host ?? '—'} />
+        <Row label="Passes (last tick)" value={status?.passes != null ? String(status.passes) : '—'} />
+      </Stack>
+
+      {state === 'down' && (
+        <Alert color="red" mt="md" title="Cron is not running">
+          Laravel deploys will stall in <b>hooks_pending</b> until the cron resumes. Check the cPanel
+          cron job runs the scheduler (or <b>cporter:work</b> on 5-minute hosts) — see
+          docs/DEPLOYMENT-CPANEL.md §4.
+        </Alert>
+      )}
+      {state === 'unknown' && (
+        <Alert color="yellow" mt="md" title="No cron heartbeat yet">
+          The cron has never checked in. Add the cPanel cron job (schedule:run every minute, or
+          cporter:work every 5 minutes) — see docs/DEPLOYMENT-CPANEL.md §4.
+        </Alert>
+      )}
+    </Card>
   );
 }
 

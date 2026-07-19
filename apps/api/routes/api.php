@@ -40,6 +40,7 @@ Route::prefix('v1')->group(function () {
 
             // ── Reads (admin + viewer) ──
             Route::get('/system/capabilities', [SystemController::class, 'capabilities']);
+            Route::get('/system/cron', [SystemController::class, 'cron']);
             Route::get('/api-keys', [ApiKeyController::class, 'index']);
             Route::get('/projects', [ProjectController::class, 'index']);
             Route::get('/projects/{project}', [ProjectController::class, 'show']);
@@ -56,6 +57,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('/api-keys', [ApiKeyController::class, 'store']);
                 Route::delete('/api-keys/{apiKey}', [ApiKeyController::class, 'destroy']);
                 Route::post('/projects', [ProjectController::class, 'store']);
+                Route::post('/projects/{project}/preflight', [ProjectController::class, 'preflight']);
                 Route::patch('/projects/{project}', [ProjectController::class, 'update']);
                 Route::delete('/projects/{project}', [ProjectController::class, 'destroy']);
                 Route::post('/releases/{release}/activate', [ReleaseController::class, 'activate']);

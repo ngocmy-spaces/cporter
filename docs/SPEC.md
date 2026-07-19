@@ -379,6 +379,14 @@ Use A **or** B, not both — with B you do not also add the `schedule:run` cron.
 (cPanel ▸ Cron Jobs); auto-creation via cPanel UAPI at setup is a possible future enhancement. Full crontab
 lines: [docs/DEPLOYMENT-CPANEL.md §4](DEPLOYMENT-CPANEL.md).
 
+**Cron liveness (heartbeat).** Each tick records a heartbeat in the `settings` store — `cron_tick_last_run`
+(Mode A, via `cporter:run-jobs`) and `cron_worker_last_run` (Mode B, via `cporter:work`); the two keys keep
+the active mode unambiguous (when `cporter:work` calls run-jobs internally it passes `--no-heartbeat`).
+`GET /system/cron` returns `{state: healthy|down|unknown, mode, age_seconds, last_run_at, host, passes}` — a
+beat older than its cadence threshold reads as `down`. The Admin **Settings** page surfaces this as a Cron/Worker
+card so a stalled cron (which would silently strand Laravel deploys in `hooks_pending`) is visible without any
+external monitoring service.
+
 ---
 
 ## 11. Storage Abstraction & cPanel FS Adapter

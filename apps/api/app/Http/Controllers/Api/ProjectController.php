@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Audit\AuditLogger;
 use App\Domain\Storage\PathJail;
 use App\Enums\ProjectStatus;
@@ -88,7 +89,7 @@ class ProjectController extends Controller
         return response()->json(['data' => $project->fresh()], 202);
     }
 
-    public function store(Request $request, PathJail $jail): JsonResponse
+    public function store(Request $request, PathJail $jail, StorageAdapter $storage): JsonResponse
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
@@ -110,18 +111,66 @@ class ProjectController extends Controller
             ]);
         }
 
-        // Ensure the (jail-validated) base directory exists so the first deploy can lock/extract.
-        if (! is_dir($data['base_path'])) {
-            @mkdir($data['base_path'], 0775, true);
-        }
-
         $data['slug'] = $this->uniqueSlug($data['slug'] ?? Str::slug($data['name']));
 
         $project = Project::create($data);
 
         app(AuditLogger::class)->record('project.created', $project, ['slug' => $project->slug]);
 
-        return response()->json(['data' => $project], 201);
+        // Scaffold releases/ + shared/ and probe host readiness now, so setup errors surface here
+        // rather than at first deploy. Lenient: the project is created regardless — the report tells
+        // the operator what (if anything) still needs a manual fix on the cPanel side.
+        $preflight = $this->runPreflight($project, $storage);
+
+        return response()->json(['data' => $project->fresh(), 'preflight' => $preflight], 201);
+    }
+
+    /**
+     * Ensure the on-disk scaffold and report on host readiness (docs/SPEC.md §11). Idempotent —
+     * safe to re-run from the project page after fixing a warning (e.g. creating shared/.env).
+     * Creates missing releases/ + shared/ dirs, probes symlink support, and flags anything the
+     * operator must still do by hand (missing shared files, the domain's Document Root).
+     */
+    public function preflight(Project $project, StorageAdapter $storage): JsonResponse
+    {
+        $report = $this->runPreflight($project, $storage);
+
+        // Audit only the explicit re-check; on create, `project.created` already covers it.
+        app(AuditLogger::class)->record('project.preflight', $project, [
+            'slug' => $project->slug,
+            'ok' => $report['ok'],
+        ]);
+
+        return response()->json(['data' => $report]);
+    }
+
+    /**
+     * @return array{ok: bool, base_path: string, checks: list<array{key: string, label: string, status: string, detail: string}>}
+     */
+    private function runPreflight(Project $project, StorageAdapter $storage): array
+    {
+        $report = $storage->preflight($project->base_path, $project->shared_paths ?? []);
+
+        // Document Root is a cPanel vhost concern cPorter can't configure — always a manual reminder.
+        $report['checks'][] = $this->docrootCheck($project);
+
+        return $report;
+    }
+
+    /**
+     * @return array{key: string, label: string, status: string, detail: string}
+     */
+    private function docrootCheck(Project $project): array
+    {
+        $sub = trim((string) $project->docroot_subpath, '/');
+        $target = rtrim($project->base_path, '/').'/current'.($sub !== '' ? '/'.$sub : '');
+
+        return [
+            'key' => 'docroot',
+            'label' => 'Document Root',
+            'status' => 'manual',
+            'detail' => "In cPanel, point the domain's Document Root to {$target} — cPorter cannot configure the vhost.",
+        ];
     }
 
     /**

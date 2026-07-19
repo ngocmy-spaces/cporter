@@ -2,9 +2,11 @@
 
 use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Storage\PathJail;
+use App\Domain\System\CronHeartbeat;
 use App\Enums\DeploymentStatus;
 use App\Models\Deployment;
 use App\Models\Project;
+use App\Models\Setting;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
@@ -30,6 +32,12 @@ it('runs a single pass with --duration=0 and finalizes work via its sub-commands
 
     expect($code)->toBe(0)
         ->and(Deployment::find($stuck->id)->status)->toBe(DeploymentStatus::Failed);
+
+    // The worker records a Mode-B heartbeat; the nested run-jobs must NOT record a Mode-A tick.
+    $status = app(CronHeartbeat::class)->status();
+    expect($status['mode'])->toBe('B')
+        ->and($status['state'])->toBe('healthy')
+        ->and(Setting::read(CronHeartbeat::TICK_KEY))->toBeNull();
 
     rmdir($base);
 });

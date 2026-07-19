@@ -67,4 +67,21 @@ interface StorageAdapter
 
     /** Resolve what `current` points at, or null if none. */
     public function currentTarget(string $projectBasePath): ?string;
+
+    /**
+     * Idempotently ensure a project's on-disk scaffold and report on host readiness, so
+     * setup errors surface at project-setup time rather than mid-deploy (docs/SPEC.md §11).
+     *
+     * Creates any missing `base_path`, `releases/` and `shared/` directories (reconcile — never
+     * overwrites), probes symlink support, inspects the `current` symlink, and flags shared
+     * FILE entries that must be created by hand. It never creates `current` (there is no release
+     * to point at yet) and never touches the domain's Document Root (a cPanel vhost concern).
+     *
+     * Lenient: filesystem failures are reported as `error` checks, not thrown.
+     *
+     * @param  list<string|array{path: string, type: string}>  $sharedPaths
+     * @return array{ok: bool, base_path: string, checks: list<array{key: string, label: string, status: string, detail: string}>}
+     *                                                                                                                             status ∈ ok | created | pending | warning | error
+     */
+    public function preflight(string $projectBasePath, array $sharedPaths = []): array;
 }
