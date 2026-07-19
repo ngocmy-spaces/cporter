@@ -26,7 +26,7 @@ type NavItem = {
 
 /** Primary, everyday operations — shown flat at the top of the navbar. */
 const MAIN_NAV: NavItem[] = [
-  { to: '/', label: 'Dashboard', end: true, icon: IconLayoutDashboard },
+  { to: '/', label: 'Overview', end: true, icon: IconLayoutDashboard },
   { to: '/projects', label: 'Projects', icon: IconFolders },
   { to: '/deployments', label: 'Deployments', icon: IconRocket },
 ];

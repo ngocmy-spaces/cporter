@@ -67,9 +67,9 @@ export function DashboardPage() {
   return (
     <Stack gap="lg">
       <div>
-        <Title order={2}>Dashboard</Title>
+        <Title order={2}>Overview</Title>
         <Text c="dimmed" size="sm">
-          Tổng quan hệ thống cPorter.
+          A snapshot of the cPorter system.
         </Text>
       </div>
 

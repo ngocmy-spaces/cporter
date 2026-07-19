@@ -7,7 +7,7 @@ export function Placeholder({ title, children }: { title: string; children?: Rea
       <Title order={2}>{title}</Title>
       <Paper withBorder p="lg" radius="md">
         <Text c="dimmed" size="sm">
-          {children ?? 'Chưa triển khai — xem TASKS.md để biết task tương ứng.'}
+          {children ?? 'Not implemented yet — see TASKS.md for the corresponding task.'}
         </Text>
       </Paper>
     </Stack>
