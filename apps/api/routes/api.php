@@ -57,6 +57,7 @@ Route::prefix('v1')->group(function () {
                 Route::delete('/api-keys/{apiKey}', [ApiKeyController::class, 'destroy']);
                 Route::post('/projects', [ProjectController::class, 'store']);
                 Route::patch('/projects/{project}', [ProjectController::class, 'update']);
+                Route::delete('/projects/{project}', [ProjectController::class, 'destroy']);
                 Route::post('/releases/{release}/activate', [ReleaseController::class, 'activate']);
 
                 Route::get('/users', [UserController::class, 'index']);

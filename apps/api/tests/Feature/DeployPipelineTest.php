@@ -69,6 +69,17 @@ it('rejects a deploy to a disabled project', function () {
     expect(is_link($this->base.'/current'))->toBeFalse();
 });
 
+it('rejects a deploy to a project being deleted', function () {
+    $this->project->update(['status' => 'deleting']);
+
+    $zip = buildZip(['index.html' => '<h1>cPorter</h1>']);
+
+    $this->withToken($this->token)->post('/api/v1/projects/demo/deployments', [
+        'artifact' => upload($zip),
+        'sha256' => hash_file('sha256', $zip),
+    ])->assertStatus(409);
+});
+
 it('deploys a static artifact end to end', function () {
     $zip = buildZip(['index.html' => '<h1>cPorter</h1>']);
 

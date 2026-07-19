@@ -27,8 +27,8 @@ interface StorageAdapter
      * a {path, type} pair where type is 'file' or 'dir'. The type disambiguates how a
      * shared entry absent from both the release and shared/ is seeded.
      *
-     * @param list<string|array{path: string, type: string}> $sharedPaths
-     *        e.g. [['path' => '.env', 'type' => 'file'], ['path' => 'storage', 'type' => 'dir']]
+     * @param  list<string|array{path: string, type: string}>  $sharedPaths
+     *                                                                       e.g. [['path' => '.env', 'type' => 'file'], ['path' => 'storage', 'type' => 'dir']]
      */
     public function linkShared(string $releaseDir, string $sharedDir, array $sharedPaths): void;
 
@@ -40,12 +40,22 @@ interface StorageAdapter
     public function pruneReleases(string $projectBasePath, int $keep): array;
 
     /**
+     * Reclaim disk for a project being deleted (docs/SPEC.md §5).
+     *
+     * @param  'releases'|'all'  $level
+     *                                   'releases' → delete releases/ and the `current` symlink, keep shared/ (user data such as .env, uploads)
+     *                                   'all'      → delete the entire project base_path folder
+     * @return int bytes freed (best-effort, measured before deletion)
+     */
+    public function purgeProject(string $projectBasePath, string $level): int;
+
+    /**
      * Compute the project's on-disk footprint in bytes. Symlinks are never followed, so
      * shared content (symlinked into each release) is counted once, under `current`.
      *
      * @return array{current: int, releases: int}
-     *   current  = the live release (via `current`) plus shared/ — what the site occupies now
-     *   releases = every retained release directory under releases/ (rollback history)
+     *                                            current  = the live release (via `current`) plus shared/ — what the site occupies now
+     *                                            releases = every retained release directory under releases/ (rollback history)
      */
     public function diskStats(string $projectBasePath): array;
 

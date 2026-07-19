@@ -1,10 +1,14 @@
 <?php
 
+use App\Adapters\Storage\StorageAdapter;
+use App\Domain\Audit\AuditLogger;
 use App\Domain\Storage\PathJail;
+use App\Jobs\PurgeProjectJob;
 use App\Models\Project;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
 
@@ -156,4 +160,101 @@ it('requires admin auth to update a project', function () {
     Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base]);
 
     $this->patchJson('/api/v1/projects/shop', ['name' => 'x'])->assertUnauthorized();
+});
+
+it('soft-deletes a project without touching disk when purge is none', function () {
+    $project = Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base]);
+    File::put($this->base.'/keep.txt', 'x');
+
+    $this->actingAs($this->admin)->deleteJson('/api/v1/projects/shop', ['purge' => 'none'])
+        ->assertOk();
+
+    expect(Project::withTrashed()->find($project->id)->trashed())->toBeTrue();
+    $this->actingAs($this->admin)->getJson('/api/v1/projects/shop')->assertNotFound();
+    expect(File::exists($this->base.'/keep.txt'))->toBeTrue();
+});
+
+it('queues an async disk purge and marks the project deleting', function () {
+    Queue::fake();
+    $project = Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base]);
+
+    $this->actingAs($this->admin)->deleteJson('/api/v1/projects/shop', ['purge' => 'all'])
+        ->assertStatus(202)
+        ->assertJsonPath('data.status', 'deleting');
+
+    expect($project->fresh()->trashed())->toBeFalse();
+    Queue::assertPushed(
+        PurgeProjectJob::class,
+        fn ($job) => $job->level === 'all' && $job->project->id === $project->id,
+    );
+});
+
+it('purges releases but keeps shared data, then hides the project', function () {
+    $project = Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base, 'status' => 'deleting']);
+    File::makeDirectory($this->base.'/releases/1', 0777, true, true);
+    File::put($this->base.'/releases/1/index.html', 'hi');
+    File::makeDirectory($this->base.'/shared', 0777, true, true);
+    File::put($this->base.'/shared/.env', 'SECRET=1');
+
+    (new PurgeProjectJob($project, 'releases'))->handle(app(StorageAdapter::class), app(AuditLogger::class));
+
+    expect(File::isDirectory($this->base.'/releases'))->toBeFalse();
+    expect(File::exists($this->base.'/shared/.env'))->toBeTrue();
+    expect(Project::withTrashed()->find($project->id)->trashed())->toBeTrue();
+});
+
+it('purges the entire base_path when the job runs with purge all', function () {
+    $project = Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base, 'status' => 'deleting']);
+    File::makeDirectory($this->base.'/releases/1', 0777, true, true);
+    File::makeDirectory($this->base.'/shared', 0777, true, true);
+    File::put($this->base.'/shared/.env', 'SECRET=1');
+
+    (new PurgeProjectJob($project, 'all'))->handle(app(StorageAdapter::class), app(AuditLogger::class));
+
+    expect(File::isDirectory($this->base))->toBeFalse();
+    expect(Project::withTrashed()->find($project->id)->trashed())->toBeTrue();
+});
+
+it('rejects an unknown purge level', function () {
+    Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base]);
+
+    $this->actingAs($this->admin)->deleteJson('/api/v1/projects/shop', ['purge' => 'wipe-everything'])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('purge');
+});
+
+it('requires admin auth to delete a project', function () {
+    Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base]);
+
+    $this->deleteJson('/api/v1/projects/shop')->assertUnauthorized();
+});
+
+it('paginates projects when a page param is present', function () {
+    Project::factory()->count(3)->create();
+
+    $this->actingAs($this->admin)->getJson('/api/v1/projects?per_page=2')
+        ->assertOk()
+        ->assertJsonCount(2, 'data')
+        ->assertJsonPath('meta.total', 3)
+        ->assertJsonPath('meta.per_page', 2)
+        ->assertJsonPath('meta.last_page', 2);
+});
+
+it('returns the full unpaginated list when no page param is given', function () {
+    Project::factory()->count(3)->create();
+
+    $this->actingAs($this->admin)->getJson('/api/v1/projects')
+        ->assertOk()
+        ->assertJsonCount(3, 'data')
+        ->assertJsonMissingPath('meta');
+});
+
+it('filters projects by search term', function () {
+    Project::factory()->create(['name' => 'Alpha', 'slug' => 'alpha', 'base_path' => $this->base]);
+    Project::factory()->create(['name' => 'Beta', 'slug' => 'beta', 'base_path' => $this->base]);
+
+    $this->actingAs($this->admin)->getJson('/api/v1/projects?search=alph')
+        ->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.slug', 'alpha');
 });

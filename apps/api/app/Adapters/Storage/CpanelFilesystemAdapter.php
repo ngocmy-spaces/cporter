@@ -229,6 +229,30 @@ class CpanelFilesystemAdapter implements StorageAdapter
         return $removed;
     }
 
+    public function purgeProject(string $projectBasePath, string $level): int
+    {
+        if ($level === 'all') {
+            // Whole project folder. assertInside resolves + jails the path before we recurse.
+            $base = $this->jail->assertInside($projectBasePath);
+            $freed = is_dir($base) ? $this->dirBytes($base) : 0;
+            $this->deleteRecursive($base);
+
+            return $freed;
+        }
+
+        // 'releases': drop the versioned release tree + the `current` symlink, keep shared/.
+        $releasesDir = $this->jailedLeaf($this->trailingChild($projectBasePath, 'releases'));
+        $current = $this->jailedLeaf($this->trailingChild($projectBasePath, 'current'));
+
+        $freed = is_dir($releasesDir) ? $this->dirBytes($releasesDir) : 0;
+        $this->deleteRecursive($releasesDir);
+        if (is_link($current) || file_exists($current)) {
+            $this->deleteRecursive($current);
+        }
+
+        return $freed;
+    }
+
     public function diskStats(string $projectBasePath): array
     {
         $releasesDir = $this->jailedLeaf($this->trailingChild($projectBasePath, 'releases'));

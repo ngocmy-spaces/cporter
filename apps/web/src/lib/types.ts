@@ -4,7 +4,7 @@
  */
 
 export type ProjectType = 'static' | 'laravel' | 'php' | 'node' | 'wordpress';
-export type ProjectStatus = 'active' | 'disabled';
+export type ProjectStatus = 'active' | 'disabled' | 'deleting';
 
 export type DeploymentStatus =
   | 'queued'

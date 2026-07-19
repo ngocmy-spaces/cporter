@@ -7,6 +7,7 @@ use App\Domain\Storage\PathJail;
 use App\Enums\ProjectStatus;
 use App\Enums\ProjectType;
 use App\Http\Controllers\Controller;
+use App\Jobs\PurgeProjectJob;
 use App\Jobs\RecomputeDiskUsageJob;
 use App\Models\Project;
 use Illuminate\Http\JsonResponse;
@@ -21,9 +22,42 @@ use Illuminate\Validation\ValidationException;
  */
 class ProjectController extends Controller
 {
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        return response()->json(['data' => Project::query()->latest()->get()]);
+        $query = Project::query()->latest();
+
+        if ($search = trim((string) $request->query('search', ''))) {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', '%'.$search.'%')
+                    ->orWhere('slug', 'like', '%'.$search.'%')
+                    ->orWhere('base_path', 'like', '%'.$search.'%');
+            });
+        }
+
+        $status = (string) $request->query('status', '');
+        if (in_array($status, ['active', 'disabled', 'deleting'], true)) {
+            $query->where('status', $status);
+        }
+
+        // Opt-in pagination: with a page/per_page param, return a paginated {data, meta}
+        // envelope; otherwise the full list, preserving the shape other consumers (dashboard,
+        // token project-scoping dropdown) rely on.
+        if ($request->has('page') || $request->has('per_page')) {
+            $perPage = min(max((int) $request->query('per_page', 20), 1), 100);
+            $page = $query->paginate($perPage)->withQueryString();
+
+            return response()->json([
+                'data' => $page->items(),
+                'meta' => [
+                    'current_page' => $page->currentPage(),
+                    'last_page' => $page->lastPage(),
+                    'per_page' => $page->perPage(),
+                    'total' => $page->total(),
+                ],
+            ]);
+        }
+
+        return response()->json(['data' => $query->get()]);
     }
 
     public function show(Project $project): JsonResponse
@@ -146,6 +180,48 @@ class ProjectController extends Controller
         ]);
 
         return response()->json(['data' => $project->fresh()]);
+    }
+
+    /**
+     * Soft-delete a project (docs/SPEC.md §5), optionally reclaiming its disk. The `purge` level
+     * decides how much of the on-disk footprint is removed:
+     *   - `none`     → unmanage only: the DB row is soft-deleted immediately (hidden), files untouched.
+     *   - `releases` → delete releases/ and the `current` symlink, keep shared/ (user data such as .env, uploads).
+     *   - `all`      → delete the entire project base_path folder.
+     *
+     * With a purge level the disk work runs async (PurgeProjectJob): the project enters the
+     * `deleting` status (still visible, deploys blocked) and is soft-deleted once the job finishes.
+     */
+    public function destroy(Request $request, Project $project): JsonResponse
+    {
+        $purge = $request->validate([
+            'purge' => ['nullable', Rule::in(['none', 'releases', 'all'])],
+        ])['purge'] ?? 'none';
+
+        if ($project->status === ProjectStatus::Deleting) {
+            return response()->json(['error' => 'Project deletion is already in progress.'], 409);
+        }
+
+        if ($purge === 'none') {
+            $project->delete();
+
+            app(AuditLogger::class)->record('project.deleted', $project, [
+                'slug' => $project->slug,
+                'purge' => 'none',
+            ]);
+
+            return response()->json(['data' => null]);
+        }
+
+        $project->forceFill(['status' => ProjectStatus::Deleting])->save();
+        PurgeProjectJob::dispatch($project, $purge);
+
+        app(AuditLogger::class)->record('project.deleting', $project, [
+            'slug' => $project->slug,
+            'purge' => $purge,
+        ]);
+
+        return response()->json(['data' => $project->fresh()], 202);
     }
 
     /**

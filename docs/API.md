@@ -108,9 +108,10 @@ Used only by the SPA. **Not reachable with an API key** (session guard). Listed 
 | GET | `/system/capabilities` | read | capability probe result |
 | POST | `/system/capabilities/refresh` | admin | re-run the probe |
 | GET/POST/DELETE | `/api-keys` · `/api-keys/{id}` | read / admin | token CRUD (plaintext shown once) |
-| GET | `/projects` · `/projects/{slug}` | read | list / show projects |
+| GET | `/projects` · `/projects/{slug}` | read | list / show projects. `?search=` + `?status=active\|disabled\|deleting` filter; `?page=`/`?per_page=` (≤100) switch to a paginated `{data, meta}` envelope, else the full list |
 | POST | `/projects` | admin | create a project (jail-validated `base_path`) |
 | PATCH | `/projects/{slug}` | admin | update project config; `status: disabled` blocks new deploys. `slug`/`base_path`/`type` are frozen once releases exist |
+| DELETE | `/projects/{slug}` | admin | soft-delete a project. Body `purge`: `none` (default — hide only, files kept, `200`) · `releases` (drop releases/ + `current`, keep shared/) · `all` (delete the whole base_path). A purge runs async: the project goes `deleting` (deploys blocked) and is hidden when done → `202` |
 | GET | `/projects/{slug}/deployments` · `/projects/{slug}/releases` | read | per-project history |
 | GET | `/deployments` · `/deployments/{id}` | read | recent + detail |
 | POST | `/releases/{id}/activate` | admin | activate a release (rollback-from-UI) |

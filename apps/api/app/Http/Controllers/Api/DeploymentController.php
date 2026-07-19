@@ -235,11 +235,14 @@ class DeploymentController extends Controller
         return null;
     }
 
-    /** A disabled project (docs/SPEC.md §5) rejects new deploys until it is re-enabled. */
+    /** A disabled or deleting project (docs/SPEC.md §5) rejects new deploys. */
     private function guardProjectEnabled(Project $project): ?JsonResponse
     {
         if ($project->status === ProjectStatus::Disabled) {
             return response()->json(['error' => 'Project is disabled; deploys are not accepted.'], 409);
+        }
+        if ($project->status === ProjectStatus::Deleting) {
+            return response()->json(['error' => 'Project is being deleted; deploys are not accepted.'], 409);
         }
 
         return null;

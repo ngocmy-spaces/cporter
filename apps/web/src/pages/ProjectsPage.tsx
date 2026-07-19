@@ -7,6 +7,7 @@ import {
   Loader,
   Modal,
   NumberInput,
+  Pagination,
   Paper,
   SegmentedControl,
   Select,
@@ -16,7 +17,7 @@ import {
   TextInput,
   Title,
 } from '@mantine/core';
-import { useDisclosure } from '@mantine/hooks';
+import { useDebouncedValue, useDisclosure } from '@mantine/hooks';
 import { useForm } from '@mantine/form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -28,6 +29,15 @@ import { useAuth } from '@/lib/auth';
 import { DeploymentStatusBadge } from '@/components/StatusBadge';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
 import type { ApiEnvelope, Capabilities, Deployment, Project, SharedPath } from '@/lib/types';
+
+const PER_PAGE = 20;
+
+interface ProjectsListMeta {
+  current_page: number;
+  last_page: number;
+  per_page: number;
+  total: number;
+}
 
 const PROJECT_TYPES = [
   { value: 'static', label: 'Static' },
@@ -46,6 +56,7 @@ const STATUS_FILTERS = [
   { value: 'all', label: 'All' },
   { value: 'active', label: 'Active' },
   { value: 'disabled', label: 'Disabled' },
+  { value: 'deleting', label: 'Deleting' },
 ];
 
 interface ProjectFormValues {
@@ -84,13 +95,26 @@ export function ProjectsPage() {
   const [opened, { open, close }] = useDisclosure(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [page, setPage] = useState(1);
+  const [debouncedSearch] = useDebouncedValue(search, 300);
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, statusFilter]);
+
   const projects = useQuery({
-    queryKey: ['projects'],
-    queryFn: async () => (await api.get<ApiEnvelope<Project[]>>('/projects')).data.data,
+    queryKey: ['projects', 'list', { page, search: debouncedSearch, status: statusFilter }],
+    queryFn: async () => {
+      const params: Record<string, string | number> = { page, per_page: PER_PAGE };
+      if (debouncedSearch) params.search = debouncedSearch;
+      if (statusFilter !== 'all') params.status = statusFilter;
+      return (
+        await api.get<{ data: Project[]; meta: ProjectsListMeta }>('/projects', { params })
+      ).data;
+    },
   });
 
   // Recent cross-project feed, joined per project to surface each project's last deploy
@@ -109,18 +133,9 @@ export function ProjectsPage() {
     return map;
   }, [deployments.data]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return (projects.data ?? []).filter((p) => {
-      if (statusFilter !== 'all' && p.status !== statusFilter) return false;
-      if (!q) return true;
-      return (
-        p.name.toLowerCase().includes(q) ||
-        p.slug.toLowerCase().includes(q) ||
-        p.base_path.toLowerCase().includes(q)
-      );
-    });
-  }, [projects.data, search, statusFilter]);
+  const rows = projects.data?.data ?? [];
+  const meta = projects.data?.meta;
+  const isFiltering = search.trim().length > 0 || statusFilter !== 'all';
 
   // Allowed base paths come from the server's capability probe (CPORTER_ALLOWED_BASE_PATHS)
   // so the form can pin the prefix instead of asking the user to retype the jail root.
@@ -198,7 +213,7 @@ export function ProjectsPage() {
   const composedBasePath = composeBasePath(form.values.base_dir, form.values.base_subpath);
   const noBasePaths = !capabilities.isLoading && allowedBasePaths.length === 0;
   const prefixWidth = basePrefix ? Math.min(basePrefix.length * 8 + 16, 240) : undefined;
-  const hasProjects = (projects.data?.length ?? 0) > 0;
+  const showFilters = isFiltering || rows.length > 0;
 
   return (
     <Stack gap="lg">
@@ -216,7 +231,7 @@ export function ProjectsPage() {
         )}
       </Group>
 
-      {hasProjects && (
+      {showFilters && (
         <Group justify="space-between" wrap="wrap" gap="sm">
           <TextInput
             placeholder="Search name, slug or path"
@@ -234,7 +249,7 @@ export function ProjectsPage() {
           <Group justify="center" p="xl">
             <Loader />
           </Group>
-        ) : !hasProjects ? (
+        ) : rows.length === 0 && !isFiltering ? (
           <Stack align="center" gap="xs" p="xl">
             <Text fw={500}>No projects yet</Text>
             <Text c="dimmed" size="sm" ta="center">
@@ -261,7 +276,7 @@ export function ProjectsPage() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {filtered.map((p) => {
+                {rows.map((p) => {
                   const last = latestByProject.get(p.id);
                   return (
                     <Table.Tr key={p.id}>
@@ -303,14 +318,19 @@ export function ProjectsPage() {
                         )}
                       </Table.Td>
                       <Table.Td>
-                        <Badge color={p.status === 'active' ? 'green' : 'gray'} variant="light">
+                        <Badge
+                          color={
+                            p.status === 'active' ? 'green' : p.status === 'deleting' ? 'orange' : 'gray'
+                          }
+                          variant="light"
+                        >
                           {p.status}
                         </Badge>
                       </Table.Td>
                     </Table.Tr>
                   );
                 })}
-                {filtered.length === 0 && (
+                {rows.length === 0 && (
                   <Table.Tr>
                     <Table.Td colSpan={7}>
                       <Text c="dimmed" size="sm" ta="center" py="sm">
@@ -324,6 +344,12 @@ export function ProjectsPage() {
           </Table.ScrollContainer>
         )}
       </Paper>
+
+      {meta && meta.last_page > 1 && (
+        <Group justify="center">
+          <Pagination total={meta.last_page} value={page} onChange={setPage} />
+        </Group>
+      )}
 
       <Modal opened={opened} onClose={closeModal} title="New project" size="lg">
         <form onSubmit={form.onSubmit((values) => createProject.mutate(values))}>

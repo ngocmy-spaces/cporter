@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import {
   ActionIcon,
+  Alert,
   Anchor,
   Badge,
   Breadcrumbs,
@@ -14,6 +15,7 @@ import {
   Modal,
   NumberInput,
   Paper,
+  Radio,
   Select,
   SimpleGrid,
   Stack,
@@ -29,6 +31,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import {
+  IconAlertTriangle,
   IconCheck,
   IconExternalLink,
   IconFolders,
@@ -81,9 +84,12 @@ const EDIT_INITIAL_VALUES: ProjectEditFormValues = {
 
 export function ProjectDetailPage() {
   const { slug } = useParams<{ slug: string }>();
+  const navigate = useNavigate();
   const [selectedDeployment, setSelectedDeployment] = useState<number | null>(null);
   const [sharedOpened, { open: openShared, close: closeShared }] = useDisclosure(false);
   const [editOpened, { open: openEditDisclosure, close: closeEditDisclosure }] = useDisclosure(false);
+  const [deleteOpened, { open: openDeleteDisclosure, close: closeDeleteDisclosure }] = useDisclosure(false);
+  const [purge, setPurge] = useState<'none' | 'releases' | 'all'>('none');
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -251,6 +257,44 @@ export function ProjectDetailPage() {
     },
   });
 
+  const closeDeleteModal = () => {
+    closeDeleteDisclosure();
+    setPurge('none');
+  };
+
+  const deleteProject = useMutation({
+    mutationFn: async () => {
+      const response = await api.delete<ApiEnvelope<Project | null>>(`/projects/${slug}`, {
+        data: { purge },
+      });
+      return response;
+    },
+    onSuccess: (response) => {
+      const deleting = response.status === 202 || response.data.data?.status === 'deleting';
+      notifications.show({
+        color: 'green',
+        title: deleting ? 'Deletion started' : 'Project deleted',
+        message: deleting
+          ? 'Project is being deleted — reclaiming disk in the background.'
+          : 'Project deleted.',
+        icon: <IconCheck size={16} />,
+      });
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      navigate('/projects');
+    },
+    onError: (error) => {
+      const message = axios.isAxiosError(error)
+        ? (error.response?.data as { error?: string } | undefined)?.error
+        : undefined;
+      notifications.show({
+        color: 'red',
+        title: 'Delete failed',
+        message: message ?? 'Something went wrong.',
+        icon: <IconX size={16} />,
+      });
+    },
+  });
+
   if (project.isLoading) {
     return (
       <Group justify="center" p="xl">
@@ -351,6 +395,17 @@ export function ProjectDetailPage() {
               onClick={confirmToggleStatus}
             >
               {p.status === 'active' ? 'Disable' : 'Enable'}
+            </Button>
+          )}
+          {isAdmin && (
+            <Button
+              variant="light"
+              size="xs"
+              color="red"
+              leftSection={<IconTrash size={14} />}
+              onClick={openDeleteDisclosure}
+            >
+              Delete
             </Button>
           )}
         </Group>
@@ -685,6 +740,39 @@ export function ProjectDetailPage() {
             </Group>
           </Stack>
         </form>
+      </Modal>
+
+      <Modal opened={deleteOpened} onClose={closeDeleteModal} title="Delete project" size="md">
+        <Stack gap="sm">
+          <Text size="sm">
+            This removes <b>{p.name}</b> from cPorter. Choose what happens to the files on disk.
+          </Text>
+          <Radio.Group
+            label="Disk cleanup"
+            value={purge}
+            onChange={(value) => setPurge(value as 'none' | 'releases' | 'all')}
+          >
+            <Stack gap="xs" mt="xs">
+              <Radio value="none" label="Keep all files on disk (just stop managing it)" />
+              <Radio value="releases" label="Delete past releases, keep shared data (.env, uploads)" />
+              <Radio value="all" label="Delete everything in the project folder" />
+            </Stack>
+          </Radio.Group>
+          {purge === 'all' && (
+            <Alert color="red" variant="light" icon={<IconAlertTriangle size={16} />}>
+              This permanently deletes the entire folder <Code>{p.base_path}</Code>. This cannot be
+              undone.
+            </Alert>
+          )}
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={closeDeleteModal}>
+              Cancel
+            </Button>
+            <Button color="red" loading={deleteProject.isPending} onClick={() => deleteProject.mutate()}>
+              Delete
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
     </Stack>
   );
