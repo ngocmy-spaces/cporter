@@ -26,6 +26,7 @@ import {
   TextInput,
   ThemeIcon,
   Title,
+  Tooltip,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { useForm } from '@mantine/form';
@@ -54,6 +55,7 @@ import { DeploymentStatusBadge, ReleaseStateBadge } from '@/components/StatusBad
 import { formatBytes, formatDateTime, formatRelativeTime } from '@/lib/format';
 import type {
   ApiEnvelope,
+  AuditLog,
   Deployment,
   PreflightCheck,
   PreflightReport,
@@ -76,6 +78,22 @@ const SHARED_PATH_TYPES = [
   { value: 'file', label: 'File' },
 ];
 
+/** The two hook stages the deploy engine runs, in execution order. */
+const HOOK_STAGES = [
+  {
+    key: 'pre_activate' as const,
+    label: 'Pre-activate hooks',
+    helper:
+      'Run before the new release goes live (e.g. artisan migrate --force). If one fails, the deploy fails and nothing is swapped.',
+  },
+  {
+    key: 'post_activate' as const,
+    label: 'Post-activate hooks',
+    helper:
+      'Run after the release is live (e.g. artisan queue:restart). If one fails, cPorter auto-rolls back to the previous release.',
+  },
+];
+
 /** Color + icon shown for each preflight check status. */
 const PREFLIGHT_STATUS_META: Record<PreflightCheck['status'], { color: string; icon: ReactNode }> = {
   ok: { color: 'green', icon: <IconCheck size={14} /> },
@@ -86,6 +104,32 @@ const PREFLIGHT_STATUS_META: Record<PreflightCheck['status'], { color: string; i
   error: { color: 'red', icon: <IconX size={14} /> },
 };
 
+/** Human label + badge color for known audit-log actions; unknown actions fall back to the raw key. */
+const ACTIVITY_ACTION_META: Record<string, { label: string; color: string }> = {
+  'project.created': { label: 'Project created', color: 'green' },
+  'project.updated': { label: 'Config updated', color: 'blue' },
+  'project.preflight': { label: 'Host preflight', color: 'indigo' },
+  'project.deleting': { label: 'Deleting…', color: 'orange' },
+  'project.deleted': { label: 'Deleted', color: 'red' },
+  'project.delete_failed': { label: 'Delete failed', color: 'red' },
+};
+
+function getActivityMeta(action: string) {
+  return ACTIVITY_ACTION_META[action] ?? { label: action, color: 'gray' };
+}
+
+/** Short, human summary of an audit log's `meta` payload — empty string if there's nothing useful to show. */
+function summarizeActivityMeta(action: string, meta: Record<string, unknown> | null): string {
+  if (!meta) return '';
+  if (action === 'project.updated' && Array.isArray(meta.changed)) {
+    return `changed: ${(meta.changed as string[]).join(', ')}`;
+  }
+  if (action === 'project.preflight' && typeof meta.ok === 'boolean') {
+    return meta.ok ? 'ready' : 'needs attention';
+  }
+  return '';
+}
+
 interface ProjectEditFormValues {
   name: string;
   type: string;
@@ -94,6 +138,7 @@ interface ProjectEditFormValues {
   keep_releases: number;
   health_check_url: string;
   shared_paths: SharedPath[];
+  hooks: { pre_activate: string[]; post_activate: string[] };
 }
 
 const EDIT_INITIAL_VALUES: ProjectEditFormValues = {
@@ -104,6 +149,7 @@ const EDIT_INITIAL_VALUES: ProjectEditFormValues = {
   keep_releases: 5,
   health_check_url: '',
   shared_paths: [],
+  hooks: { pre_activate: [], post_activate: [] },
 };
 
 export function ProjectDetailPage() {
@@ -147,6 +193,12 @@ export function ProjectDetailPage() {
   const releases = useQuery({
     queryKey: ['projects', slug, 'releases'],
     queryFn: async () => (await api.get<ApiEnvelope<Release[]>>(`/projects/${slug}/releases`)).data.data,
+    enabled: !!slug,
+  });
+
+  const activity = useQuery({
+    queryKey: ['projects', slug, 'activity'],
+    queryFn: async () => (await api.get<ApiEnvelope<AuditLog[]>>(`/projects/${slug}/activity`)).data.data,
     enabled: !!slug,
   });
 
@@ -256,6 +308,10 @@ export function ProjectDetailPage() {
         shared_paths: values.shared_paths
           .map((entry) => ({ path: entry.path.trim(), type: entry.type }))
           .filter((entry) => entry.path.length > 0),
+        hooks: {
+          pre_activate: values.hooks.pre_activate.map((c) => c.trim()).filter((c) => c.length > 0),
+          post_activate: values.hooks.post_activate.map((c) => c.trim()).filter((c) => c.length > 0),
+        },
       };
       return (await api.patch<ApiEnvelope<Project>>(`/projects/${slug}`, payload)).data.data;
     },
@@ -381,6 +437,10 @@ export function ProjectDetailPage() {
       keep_releases: p.keep_releases,
       health_check_url: p.health_check_url ?? '',
       shared_paths: p.shared_paths ?? [],
+      hooks: {
+        pre_activate: p.hooks?.pre_activate ?? [],
+        post_activate: p.hooks?.post_activate ?? [],
+      },
     });
     openEditDisclosure();
   };
@@ -566,6 +626,7 @@ export function ProjectDetailPage() {
         <Tabs.List>
           <Tabs.Tab value="deployments">Deployments</Tabs.Tab>
           <Tabs.Tab value="releases">Releases</Tabs.Tab>
+          <Tabs.Tab value="activity">Activity</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="deployments" pt="md">
@@ -677,6 +738,66 @@ export function ProjectDetailPage() {
                         <Table.Td colSpan={5}>
                           <Text c="dimmed" size="sm">
                             No releases yet.
+                          </Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    )}
+                  </Table.Tbody>
+                </Table>
+              </Table.ScrollContainer>
+            )}
+          </Paper>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="activity" pt="md">
+          <Paper withBorder radius="md">
+            {activity.isLoading ? (
+              <Group justify="center" p="xl">
+                <Loader />
+              </Group>
+            ) : (
+              <Table.ScrollContainer minWidth={600}>
+                <Table highlightOnHover verticalSpacing="sm">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Action</Table.Th>
+                      <Table.Th>Actor</Table.Th>
+                      <Table.Th>When</Table.Th>
+                      <Table.Th>Details</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {(activity.data ?? []).map((log) => {
+                      const meta = getActivityMeta(log.action);
+                      const details = summarizeActivityMeta(log.action, log.meta);
+                      return (
+                        <Table.Tr key={log.id}>
+                          <Table.Td>
+                            <Badge color={meta.color} variant="light">
+                              {meta.label}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>{log.actor ?? '—'}</Table.Td>
+                          <Table.Td>
+                            <Tooltip label={formatDateTime(log.created_at)}>
+                              <Text size="sm" span>
+                                {formatRelativeTime(log.created_at)}
+                              </Text>
+                            </Tooltip>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="sm" c="dimmed">
+                              {details}
+                            </Text>
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
+                    {activity.data?.length === 0 && (
+                      <Table.Tr>
+                        <Table.Td colSpan={4}>
+                          <Text c="dimmed" size="sm">
+                            No activity yet.
                           </Text>
                         </Table.Td>
                       </Table.Tr>
@@ -805,6 +926,48 @@ export function ProjectDetailPage() {
               >
                 Add shared path
               </Button>
+            </Stack>
+            <Stack gap="sm">
+              <Text size="xs" c="dimmed">
+                Commands run on the cron worker — mainly for Laravel/Node projects.{' '}
+                <Code>artisan …</Code> commands use the project&apos;s PHP binary; anything else runs as
+                a raw shell command in the release directory.
+              </Text>
+              {HOOK_STAGES.map((stage) => (
+                <Stack gap="xs" key={stage.key}>
+                  <Text size="sm" fw={500}>
+                    {stage.label}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {stage.helper}
+                  </Text>
+                  {editForm.values.hooks[stage.key].map((_, index) => (
+                    <Group key={index} gap="xs" align="flex-start">
+                      <TextInput
+                        placeholder="artisan migrate --force"
+                        style={{ flex: 1 }}
+                        {...editForm.getInputProps(`hooks.${stage.key}.${index}`)}
+                      />
+                      <ActionIcon
+                        color="red"
+                        variant="subtle"
+                        onClick={() => editForm.removeListItem(`hooks.${stage.key}`, index)}
+                        aria-label="Remove command"
+                      >
+                        <IconTrash size={16} />
+                      </ActionIcon>
+                    </Group>
+                  ))}
+                  <Button
+                    variant="subtle"
+                    size="xs"
+                    leftSection={<IconPlus size={14} />}
+                    onClick={() => editForm.insertListItem(`hooks.${stage.key}`, '')}
+                  >
+                    Add command
+                  </Button>
+                </Stack>
+              ))}
             </Stack>
             <Group justify="flex-end" mt="md">
               <Button variant="default" onClick={closeEditModal}>

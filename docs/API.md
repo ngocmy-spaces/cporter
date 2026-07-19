@@ -168,6 +168,24 @@ endpoint above (bytes; symlinks are never followed, so shared data is counted on
 "shared_disk_usage": { "storage": 20480, ".env": 512, "public/uploads": 1048576 }
 ```
 
+### Project hooks
+
+`hooks` (accepted by `POST /projects` and `PATCH /projects/{slug}`) is an object keyed by deploy stage →
+ordered list of shell-command strings. Exactly two stages are recognised; any other key is rejected `422`:
+
+| Stage | When it runs | Failure |
+|---|---|---|
+| `pre_activate` | before the new release goes live | deploy fails; nothing is swapped |
+| `post_activate` | after activation | auto-rollback to the previous release |
+
+```json
+"hooks": { "pre_activate": ["artisan migrate --force"], "post_activate": ["artisan queue:restart"] }
+```
+
+A command starting with `artisan ` is prefixed with the project's `php_binary` (default `php`); any other
+string runs as a raw shell command in the release directory (cwd), 600s timeout, on the cron worker (§SPEC 9).
+The server trims commands and drops blanks/empty stages, so an all-empty `hooks` persists as `{}`.
+
 ---
 
 ## 6. Idempotency

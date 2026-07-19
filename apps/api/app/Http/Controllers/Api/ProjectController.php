@@ -102,7 +102,7 @@ class ProjectController extends Controller
             'health_check_url' => ['nullable', 'url'],
             'shared_paths' => ['array'],
             'shared_paths.*' => [$this->sharedPathRule()],
-            'hooks' => ['nullable', 'array'],
+            'hooks' => ['nullable', 'array', $this->hooksRule()],
         ]);
 
         if (! $jail->isInside($data['base_path'])) {
@@ -194,7 +194,7 @@ class ProjectController extends Controller
             'health_check_url' => ['sometimes', 'nullable', 'url'],
             'shared_paths' => ['sometimes', 'array'],
             'shared_paths.*' => [$this->sharedPathRule()],
-            'hooks' => ['sometimes', 'nullable', 'array'],
+            'hooks' => ['sometimes', 'nullable', 'array', $this->hooksRule()],
             'status' => ['sometimes', Rule::enum(ProjectStatus::class)],
         ]);
 
@@ -302,6 +302,51 @@ class ProjectController extends Controller
             }
 
             $fail('Each shared path must be a string or an object with "path" and "type".');
+        };
+    }
+
+    /**
+     * `hooks` is an object keyed by deploy stage → ordered list of command strings
+     * (docs/SPEC.md §9, §16). Only the stages the engine actually runs are allowed
+     * ({@see Project::HOOK_STAGES}: pre_activate, post_activate); each command is a raw
+     * shell string (an `artisan …` command is auto-prefixed with the project's php_binary).
+     * The model normalizes (trims, drops blanks) before persisting — this rule guards shape.
+     */
+    private function hooksRule(): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail): void {
+            if (! is_array($value)) {
+                $fail('hooks must be an object keyed by deploy stage.');
+
+                return;
+            }
+
+            foreach ($value as $stage => $commands) {
+                if (! in_array($stage, Project::HOOK_STAGES, true)) {
+                    $fail('Unknown hook stage "'.$stage.'". Allowed: '.implode(', ', Project::HOOK_STAGES).'.');
+
+                    continue;
+                }
+                if (! is_array($commands)) {
+                    $fail("hooks.{$stage} must be a list of command strings.");
+
+                    continue;
+                }
+                foreach ($commands as $cmd) {
+                    // null / blank entries are tolerated (UI may send empty rows; the model drops
+                    // them on normalize). Only genuinely wrong types or over-long strings fail.
+                    if ($cmd !== null && ! is_string($cmd)) {
+                        $fail("Each command in hooks.{$stage} must be a string.");
+
+                        break;
+                    }
+                    if (is_string($cmd) && strlen($cmd) > 1000) {
+                        $fail("Each command in hooks.{$stage} must be at most 1000 characters.");
+
+                        break;
+                    }
+                }
+            }
         };
     }
 

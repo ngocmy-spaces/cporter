@@ -616,6 +616,7 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 | D | Enums grew | `Deployment.status` adds `hooks_pending`; `Deployment.trigger` adds `webhook`; `Project.type` adds `wordpress`; `Project.status` adds `deleting` (transient: a disk purge is running; the row is soft-deleted once it finishes). |
 | D | Persisted fields | `Deployment.idempotency_key` is a real column with a unique `(project_id, idempotency_key)` index; a `settings` key/value table exists (probe/config). `Project` is **soft-deleted** (`deleted_at`) — a delete keeps deploy/audit history; disk reclamation is a separate opt-in (`PurgeProjectJob`). |
 | D | `Release`→`Artifact` | `artifact_id` is **nullable** (effectively `*—1 optional`, not strict `1—1`). |
+| D | `hooks` validation/normalization | `Project.hooks` is structurally validated (only `pre_activate`/`post_activate` stages; each a list of ≤1000-char command strings) and normalized on write (trim, drop blanks/empty stages → `{}`), mirroring `shared_paths`. Previously stored as a shapeless array. |
 
 ### 20.6 Ecosystem / release (§18)
 | Kind | Item | Reality |

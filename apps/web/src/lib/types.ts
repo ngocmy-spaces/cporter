@@ -57,6 +57,12 @@ export interface SharedPath {
   type: 'file' | 'dir';
 }
 
+/** Ordered shell commands run around release activation (docs/API.md — PATCH /projects/{slug}). */
+export interface ProjectHooks {
+  pre_activate?: string[];
+  post_activate?: string[];
+}
+
 export interface Project {
   id: number;
   name: string;
@@ -77,7 +83,7 @@ export interface Project {
   shared_disk_usage: Record<string, number> | null;
   health_check_url: string | null;
   shared_paths: SharedPath[];
-  hooks: Record<string, unknown> | null;
+  hooks: ProjectHooks | null;
   status: ProjectStatus;
   created_at: string;
 }
