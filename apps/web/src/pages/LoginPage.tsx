@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Alert, Button, Card, Container, PasswordInput, Text, TextInput, Title } from '@mantine/core';
+import { Alert, Anchor, Button, Card, Container, PasswordInput, Text, TextInput, Title } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { IconAlertCircle } from '@tabler/icons-react';
 import axios from 'axios';
+import { Link } from 'react-router-dom';
 import { useAuth } from '@/lib/auth';
 
 interface LoginFormValues {
@@ -75,6 +76,13 @@ export function LoginPage() {
           </Button>
         </form>
       </Card>
+
+      <Text c="dimmed" size="sm" ta="center" mt="lg">
+        New to cPorter?{' '}
+        <Anchor component={Link} to="/docs">
+          Read the docs
+        </Anchor>
+      </Text>
     </Container>
   );
 }

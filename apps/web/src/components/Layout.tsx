@@ -1,32 +1,21 @@
 import type { ComponentType } from 'react';
-import {
-  ActionIcon,
-  AppShell,
-  Badge,
-  Burger,
-  Group,
-  NavLink,
-  Text,
-  Tooltip,
-  useComputedColorScheme,
-  useMantineColorScheme,
-} from '@mantine/core';
+import { ActionIcon, AppShell, Badge, Burger, Group, NavLink, Text, Tooltip } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import {
+  IconBook,
   IconFileText,
   IconFolders,
   IconKey,
   IconLayoutDashboard,
   IconLogout,
-  IconMoon,
   IconRocket,
   IconSettings,
-  IconSun,
   IconUsers,
   IconVersions,
 } from '@tabler/icons-react';
 import { useAuth } from '@/lib/auth';
+import { ColorSchemeToggle } from '@/components/ColorSchemeToggle';
 
 type NavItem = {
   to: string;
@@ -45,21 +34,6 @@ const NAV: NavItem[] = [
   { to: '/users', label: 'Users', icon: IconUsers },
   { to: '/api-keys', label: 'API Keys', icon: IconKey },
 ];
-
-function ColorSchemeToggle() {
-  const { setColorScheme } = useMantineColorScheme();
-  const computed = useComputedColorScheme('light', { getInitialValueInEffect: true });
-  return (
-    <ActionIcon
-      variant="default"
-      size="lg"
-      aria-label="Toggle color scheme"
-      onClick={() => setColorScheme(computed === 'dark' ? 'light' : 'dark')}
-    >
-      {computed === 'dark' ? <IconSun size={18} stroke={1.5} /> : <IconMoon size={18} stroke={1.5} />}
-    </ActionIcon>
-  );
-}
 
 function UserMenu() {
   const { user, logout } = useAuth();
@@ -113,6 +87,18 @@ export function Layout() {
             <Badge variant="light" color="gray">
               v0.1.0 · Phase 0
             </Badge>
+            <Tooltip label="Documentation">
+              <ActionIcon
+                component={Link}
+                to="/docs"
+                variant="subtle"
+                color="gray"
+                size="lg"
+                aria-label="Documentation"
+              >
+                <IconBook size={18} stroke={1.5} />
+              </ActionIcon>
+            </Tooltip>
             <UserMenu />
             <ColorSchemeToggle />
           </Group>

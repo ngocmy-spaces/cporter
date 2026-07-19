@@ -1,0 +1,85 @@
+name: 'cPorter Deploy'
+description: 'Upload a built artifact to cPorter and deploy it, waiting for the result.'
+author: 'cPorter'
+branding:
+  icon: 'upload-cloud'
+  color: 'blue'
+
+inputs:
+  host:
+    description: 'cPorter base URL, e.g. https://deploy.example.com. Store as a secret.'
+    required: true
+  token:
+    description: 'cPorter API key (cpk_…). Store as a secret — never hard-code it.'
+    required: true
+  project:
+    description: 'Target project slug.'
+    required: true
+  artifact:
+    description: 'Path to the built artifact .zip to deploy.'
+    required: true
+  version:
+    description: 'Optional version label (defaults to a server-generated release id).'
+    required: false
+    default: ''
+  wait:
+    description: 'Wait for the deployment to reach a terminal status (true/false).'
+    required: false
+    default: 'true'
+  timeout:
+    description: 'Max wait time in milliseconds.'
+    required: false
+    default: '600000'
+  idempotency-key:
+    description: 'Override the idempotency key (defaults to the artifact SHA-256).'
+    required: false
+    default: ''
+  cli-version:
+    description: 'Version of @cporter/cli to run via npx.'
+    required: false
+    default: 'latest'
+
+outputs:
+  deployment-id:
+    description: 'The id of the created deployment.'
+    value: ${{ steps.deploy.outputs.deployment-id }}
+  status:
+    description: 'The deployment status (success/failed/rolled_back/queued).'
+    value: ${{ steps.deploy.outputs.status }}
+  release-version:
+    description: 'The release version that was deployed.'
+    value: ${{ steps.deploy.outputs.release-version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: deploy
+      shell: bash
+      # Secrets go through the environment, not argv, so they never appear in the process
+      # list or the command echo. The CLI reads CPORTER_HOST/TOKEN/PROJECT from env.
+      env:
+        CPORTER_HOST: ${{ inputs.host }}
+        CPORTER_TOKEN: ${{ inputs.token }}
+        CPORTER_PROJECT: ${{ inputs.project }}
+      run: |
+        set -euo pipefail
+
+        args=(deploy "${{ inputs.artifact }}" --json --timeout "${{ inputs.timeout }}")
+        [ -n "${{ inputs.version }}" ] && args+=(--version "${{ inputs.version }}")
+        [ -n "${{ inputs.idempotency-key }}" ] && args+=(--idempotency-key "${{ inputs.idempotency-key }}")
+        if [ "${{ inputs.wait }}" = "true" ]; then args+=(--wait); else args+=(--no-wait); fi
+
+        # Human-readable progress streams to stderr (visible in the Action log);
+        # the JSON deployment is captured from stdout.
+        result="$(npx -y "@cporter/cli@${{ inputs.cli-version }}" "${args[@]}")"
+        echo "$result"
+
+        deployment_id="$(echo "$result" | jq -r '.id // empty')"
+        status="$(echo "$result" | jq -r '.status // empty')"
+        release_version="$(echo "$result" | jq -r '.release.version // empty')"
+
+        {
+          echo "deployment-id=$deployment_id"
+          echo "status=$status"
+          echo "release-version=$release_version"
+        } >> "$GITHUB_OUTPUT"
