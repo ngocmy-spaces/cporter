@@ -5,6 +5,7 @@ import {
   Badge,
   Breadcrumbs,
   Button,
+  Code,
   Group,
   Loader,
   Paper,
@@ -133,6 +134,28 @@ export function ProjectDetailPage() {
           </Badge>
         </Group>
       </Group>
+
+      <Paper withBorder radius="md" p="md">
+        <Title order={4} mb="xs">
+          Shared paths
+        </Title>
+        {p.shared_paths && p.shared_paths.length > 0 ? (
+          <Stack gap="xs">
+            {p.shared_paths.map((sp, index) => (
+              <Group key={`${sp.path}-${index}`} justify="space-between" wrap="nowrap">
+                <Code>{sp.path}</Code>
+                <Badge color={sp.type === 'dir' ? 'blue' : 'grape'} variant="light">
+                  {sp.type}
+                </Badge>
+              </Group>
+            ))}
+          </Stack>
+        ) : (
+          <Text c="dimmed" size="sm">
+            No shared paths configured.
+          </Text>
+        )}
+      </Paper>
 
       <Tabs defaultValue="deployments">
         <Tabs.List>
