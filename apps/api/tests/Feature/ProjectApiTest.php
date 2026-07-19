@@ -258,3 +258,75 @@ it('filters projects by search term', function () {
         ->assertJsonCount(1, 'data')
         ->assertJsonPath('data.0.slug', 'alpha');
 });
+
+// ── Preflight / host scaffolding ─────────────────────────────────────────────
+
+/** @return array<string, array{key: string, label: string, status: string, detail: string}> */
+function checksByKey(array $checks): array
+{
+    return collect($checks)->keyBy('key')->all();
+}
+
+it('scaffolds releases/ and shared/ and returns a preflight report when creating a project', function () {
+    $site = $this->base.'/site';
+
+    $response = $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+        'name' => 'Fresh Site',
+        'base_path' => $site,
+        'type' => 'static',
+    ])->assertCreated()->assertJsonPath('preflight.ok', true);
+
+    expect(File::isDirectory($site.'/releases'))->toBeTrue();
+    expect(File::isDirectory($site.'/shared'))->toBeTrue();
+
+    $checks = checksByKey($response->json('preflight.checks'));
+    expect($checks['releases']['status'])->toBe('created');
+    expect($checks['shared']['status'])->toBe('created');
+    expect($checks['symlink']['status'])->toBe('ok');
+    expect($checks['current']['status'])->toBe('pending');
+    expect($checks['docroot']['status'])->toBe('manual');
+});
+
+it('is idempotent — re-running preflight reports existing dirs as ok', function () {
+    $project = Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base, 'type' => 'static']);
+    File::makeDirectory($this->base.'/releases', 0775, true, true);
+    File::makeDirectory($this->base.'/shared', 0775, true, true);
+
+    $response = $this->actingAs($this->admin)->postJson("/api/v1/projects/{$project->slug}/preflight")
+        ->assertOk()->assertJsonPath('data.ok', true);
+
+    $checks = checksByKey($response->json('data.checks'));
+    expect($checks['releases']['status'])->toBe('ok');
+    expect($checks['shared']['status'])->toBe('ok');
+});
+
+it('warns about a missing shared file until the operator creates it', function () {
+    $project = Project::factory()->create([
+        'slug' => 'laravel-app',
+        'base_path' => $this->base,
+        'type' => 'laravel',
+        'shared_paths' => [['path' => '.env', 'type' => 'file']],
+    ]);
+
+    $before = $this->actingAs($this->admin)->postJson("/api/v1/projects/{$project->slug}/preflight")->assertOk();
+    expect(checksByKey($before->json('data.checks'))['shared_files']['status'])->toBe('warning');
+
+    File::put($this->base.'/shared/.env', 'APP_KEY=base64:x');
+
+    $after = $this->actingAs($this->admin)->postJson("/api/v1/projects/{$project->slug}/preflight")->assertOk();
+    expect(checksByKey($after->json('data.checks'))['shared_files']['status'])->toBe('ok');
+});
+
+it('records an audit log entry for a preflight run', function () {
+    $project = Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base, 'type' => 'static']);
+
+    $this->actingAs($this->admin)->postJson("/api/v1/projects/{$project->slug}/preflight")->assertOk();
+
+    $this->assertDatabaseHas('audit_logs', ['action' => 'project.preflight', 'subject_id' => $project->id]);
+});
+
+it('requires admin auth to run preflight', function () {
+    Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base]);
+
+    $this->postJson('/api/v1/projects/shop/preflight')->assertUnauthorized();
+});

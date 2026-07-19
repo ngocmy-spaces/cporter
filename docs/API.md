@@ -109,7 +109,8 @@ Used only by the SPA. **Not reachable with an API key** (session guard). Listed 
 | POST | `/system/capabilities/refresh` | admin | re-run the probe |
 | GET/POST/DELETE | `/api-keys` · `/api-keys/{id}` | read / admin | token CRUD (plaintext shown once) |
 | GET | `/projects` · `/projects/{slug}` | read | list / show projects. `?search=` + `?status=active\|disabled\|deleting` filter; `?page=`/`?per_page=` (≤100) switch to a paginated `{data, meta}` envelope, else the full list |
-| POST | `/projects` | admin | create a project (jail-validated `base_path`) |
+| POST | `/projects` | admin | create a project (jail-validated `base_path`). Also scaffolds `releases/` + `shared/` and returns a `preflight` report alongside `data` (see below) |
+| POST | `/projects/{slug}/preflight` | admin | (re-)run host preflight: idempotently ensure `releases/` + `shared/`, probe symlink support, inspect `current`, flag missing shared files + the manual Document-Root step → `{ data: <report> }` |
 | PATCH | `/projects/{slug}` | admin | update project config; `status: disabled` blocks new deploys. `slug`/`base_path`/`type` are frozen once releases exist |
 | DELETE | `/projects/{slug}` | admin | soft-delete a project. Body `purge`: `none` (default — hide only, files kept, `200`) · `releases` (drop releases/ + `current`, keep shared/) · `all` (delete the whole base_path). A purge runs async: the project goes `deleting` (deploys blocked) and is hidden when done → `202` |
 | GET | `/projects/{slug}/deployments` · `/projects/{slug}/releases` | read | per-project history |
@@ -121,6 +122,32 @@ Used only by the SPA. **Not reachable with an API key** (session guard). Listed 
 > ⚠️ **Contract gap to know:** SPEC §7 listed `GET /projects` and `GET /projects/{slug}/releases` as CI
 > *read-scope* endpoints, but they are implemented **admin-session-only**. A read-scope API key cannot list
 > projects or releases today. If CI needs this, it's a backlog item (SPEC §20).
+
+### Preflight report
+
+`POST /projects` (as `preflight`) and `POST /projects/{slug}/preflight` (as `data`) return:
+
+```json
+{
+  "ok": true,
+  "base_path": "/home/user/site",
+  "checks": [
+    { "key": "base_path",    "label": "Project base directory", "status": "ok",      "detail": "…" },
+    { "key": "releases",     "label": "releases/ …",            "status": "created", "detail": "…" },
+    { "key": "shared",       "label": "shared/ …",              "status": "created", "detail": "…" },
+    { "key": "symlink",      "label": "Symlink support",        "status": "ok",      "detail": "…" },
+    { "key": "current",      "label": "current symlink",        "status": "pending", "detail": "…" },
+    { "key": "shared_files", "label": "Shared files",           "status": "warning", "detail": "…" },
+    { "key": "docroot",      "label": "Document Root",          "status": "manual",  "detail": "…" }
+  ]
+}
+```
+
+`status` ∈ `ok | created | pending | warning | error | manual`. `ok` (top-level) is `true` when no check
+is `error`; `warning`/`manual`/`pending` do not fail it. cPorter **creates** `base_path`, `releases/`,
+`shared/` (idempotent — never overwrites) but **never** creates `current` (`pending` until the first
+deploy) nor the domain's Document Root (`manual` — a cPanel vhost concern). A shared entry of type `file`
+absent from `shared/` is a `warning`: create it by hand or the deploy fails at `link_shared`.
 
 ---
 

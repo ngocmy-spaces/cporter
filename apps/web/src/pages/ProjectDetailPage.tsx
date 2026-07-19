@@ -11,6 +11,7 @@ import {
   Code,
   Drawer,
   Group,
+  List,
   Loader,
   Modal,
   NumberInput,
@@ -23,6 +24,7 @@ import {
   Tabs,
   Text,
   TextInput,
+  ThemeIcon,
   Title,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
@@ -32,9 +34,12 @@ import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import {
   IconAlertTriangle,
+  IconChecklist,
   IconCheck,
+  IconClock,
   IconExternalLink,
   IconFolders,
+  IconInfoCircle,
   IconPencil,
   IconPlus,
   IconRefresh,
@@ -47,7 +52,16 @@ import { useAuth } from '@/lib/auth';
 import { DeploymentDrawer } from '@/components/DeploymentDrawer';
 import { DeploymentStatusBadge, ReleaseStateBadge } from '@/components/StatusBadge';
 import { formatBytes, formatDateTime, formatRelativeTime } from '@/lib/format';
-import type { ApiEnvelope, Deployment, Project, ProjectStatus, Release, SharedPath } from '@/lib/types';
+import type {
+  ApiEnvelope,
+  Deployment,
+  PreflightCheck,
+  PreflightReport,
+  Project,
+  ProjectStatus,
+  Release,
+  SharedPath,
+} from '@/lib/types';
 
 const PROJECT_TYPES = [
   { value: 'static', label: 'Static' },
@@ -61,6 +75,16 @@ const SHARED_PATH_TYPES = [
   { value: 'dir', label: 'Directory' },
   { value: 'file', label: 'File' },
 ];
+
+/** Color + icon shown for each preflight check status. */
+const PREFLIGHT_STATUS_META: Record<PreflightCheck['status'], { color: string; icon: ReactNode }> = {
+  ok: { color: 'green', icon: <IconCheck size={14} /> },
+  created: { color: 'teal', icon: <IconCheck size={14} /> },
+  pending: { color: 'gray', icon: <IconClock size={14} /> },
+  warning: { color: 'yellow', icon: <IconAlertTriangle size={14} /> },
+  manual: { color: 'blue', icon: <IconInfoCircle size={14} /> },
+  error: { color: 'red', icon: <IconX size={14} /> },
+};
 
 interface ProjectEditFormValues {
   name: string;
@@ -90,6 +114,8 @@ export function ProjectDetailPage() {
   const [editOpened, { open: openEditDisclosure, close: closeEditDisclosure }] = useDisclosure(false);
   const [deleteOpened, { open: openDeleteDisclosure, close: closeDeleteDisclosure }] = useDisclosure(false);
   const [purge, setPurge] = useState<'none' | 'releases' | 'all'>('none');
+  const [preflightOpened, { open: openPreflightModal, close: closePreflightModal }] = useDisclosure(false);
+  const [preflightReport, setPreflightReport] = useState<PreflightReport | null>(null);
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -166,6 +192,34 @@ export function ProjectDetailPage() {
         color: 'red',
         title: 'Recalculation failed',
         message: message ?? 'Could not start disk usage recalculation.',
+        icon: <IconX size={16} />,
+      });
+    },
+  });
+
+  const preflight = useMutation({
+    mutationFn: async () =>
+      (await api.post<ApiEnvelope<PreflightReport>>(`/projects/${slug}/preflight`)).data.data,
+    onSuccess: (report) => {
+      setPreflightReport(report);
+      openPreflightModal();
+      notifications.show({
+        color: report.ok ? 'green' : 'red',
+        title: report.ok ? 'Host is ready' : 'Host needs attention',
+        message: report.ok
+          ? 'All preflight checks passed — see details.'
+          : 'One or more checks reported an error — see details.',
+        icon: report.ok ? <IconCheck size={16} /> : <IconAlertTriangle size={16} />,
+      });
+    },
+    onError: (error) => {
+      const message = axios.isAxiosError(error)
+        ? (error.response?.data as { error?: string } | undefined)?.error
+        : undefined;
+      notifications.show({
+        color: 'red',
+        title: 'Preflight failed',
+        message: message ?? 'Could not run the host preflight check.',
         icon: <IconX size={16} />,
       });
     },
@@ -472,15 +526,27 @@ export function ProjectDetailPage() {
               <Text size="sm">{formatBytes(p.releases_disk_usage)}</Text>
             </Info>
             <Info label="Disk stats">
-              <Button
-                size="compact-xs"
-                variant="light"
-                leftSection={<IconRefresh size={14} />}
-                loading={diskBusy}
-                onClick={() => recomputeDisk.mutate()}
-              >
-                {diskBusy ? 'Recalculating…' : 'Recalculate'}
-              </Button>
+              <Group gap="xs">
+                <Button
+                  size="compact-xs"
+                  variant="light"
+                  leftSection={<IconRefresh size={14} />}
+                  loading={diskBusy}
+                  onClick={() => recomputeDisk.mutate()}
+                >
+                  {diskBusy ? 'Recalculating…' : 'Recalculate'}
+                </Button>
+                <Button
+                  size="compact-xs"
+                  variant="light"
+                  leftSection={<IconChecklist size={14} />}
+                  loading={preflight.isPending}
+                  disabled={preflight.isPending}
+                  onClick={() => preflight.mutate()}
+                >
+                  {preflight.isPending ? 'Checking…' : 'Check host setup'}
+                </Button>
+              </Group>
               <Text size="xs" c="dimmed">
                 {p.disk_usage_calculated_at
                   ? `updated ${formatRelativeTime(p.disk_usage_calculated_at)}`
@@ -773,6 +839,62 @@ export function ProjectDetailPage() {
             </Button>
           </Group>
         </Stack>
+      </Modal>
+
+      <Modal opened={preflightOpened} onClose={closePreflightModal} title="Host preflight check" size="lg">
+        {preflightReport && (
+          <Stack gap="md">
+            <Alert
+              color={preflightReport.ok ? 'green' : 'red'}
+              variant="light"
+              icon={preflightReport.ok ? <IconCheck size={16} /> : <IconAlertTriangle size={16} />}
+            >
+              <Text fw={600} size="sm">
+                {preflightReport.ok ? 'Host is ready to deploy' : 'Host needs attention before deploying'}
+              </Text>
+              <Text size="xs" c="dimmed" mt={4}>
+                <b>Manual</b> (e.g. Document Root) and <b>warning</b> (e.g. shared files) checks are
+                steps you complete yourself in cPanel — they don&apos;t block this result. A{' '}
+                <b>pending</b> <Code>current</Code> symlink is normal before the first deploy.
+              </Text>
+            </Alert>
+            <Text size="xs" c="dimmed">
+              Base path: <Code>{preflightReport.base_path}</Code>
+            </Text>
+            <List spacing="md" size="sm">
+              {preflightReport.checks.map((check) => {
+                const meta = PREFLIGHT_STATUS_META[check.status];
+                return (
+                  <List.Item
+                    key={check.key}
+                    icon={
+                      <ThemeIcon color={meta.color} variant="light" size={24} radius="xl">
+                        {meta.icon}
+                      </ThemeIcon>
+                    }
+                  >
+                    <Group gap="xs" wrap="wrap">
+                      <Text size="sm" fw={600}>
+                        {check.label}
+                      </Text>
+                      <Badge size="xs" color={meta.color} variant="light">
+                        {check.status}
+                      </Badge>
+                    </Group>
+                    <Text size="xs" c="dimmed">
+                      {check.detail}
+                    </Text>
+                  </List.Item>
+                );
+              })}
+            </List>
+            <Group justify="flex-end">
+              <Button variant="default" onClick={closePreflightModal}>
+                Close
+              </Button>
+            </Group>
+          </Stack>
+        )}
       </Modal>
     </Stack>
   );

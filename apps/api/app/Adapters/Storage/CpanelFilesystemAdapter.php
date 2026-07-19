@@ -348,6 +348,132 @@ class CpanelFilesystemAdapter implements StorageAdapter
         return null;
     }
 
+    public function preflight(string $projectBasePath, array $sharedPaths = []): array
+    {
+        // Jail-validate the base once; a config/path mismatch is a hard, blocking error.
+        try {
+            $base = $this->jail->assertInside($projectBasePath);
+        } catch (PathOutsideJailException $e) {
+            return [
+                'ok' => false,
+                'base_path' => $projectBasePath,
+                'checks' => [[
+                    'key' => 'base_path',
+                    'label' => 'Project base directory',
+                    'status' => 'error',
+                    'detail' => $e->getMessage(),
+                ]],
+            ];
+        }
+
+        $checks = [
+            $this->ensureDirCheck('base_path', $base, 'Project base directory'),
+            $this->ensureDirCheck('releases', rtrim($base, '/').'/releases', 'releases/ (versioned release directories)'),
+            $this->ensureDirCheck('shared', rtrim($base, '/').'/shared', 'shared/ (data persisted across releases)'),
+            $this->probeSymlink($base),
+            $this->currentCheck($projectBasePath),
+            $this->sharedFilesCheck(rtrim($base, '/').'/shared', $sharedPaths),
+        ];
+
+        $ok = array_filter($checks, fn (array $c) => $c['status'] === 'error') === [];
+
+        return ['ok' => $ok, 'base_path' => $base, 'checks' => array_values($checks)];
+    }
+
+    /** Create $path if missing (reconcile), reporting created / ok / error. */
+    private function ensureDirCheck(string $key, string $path, string $label): array
+    {
+        if (is_dir($path)) {
+            return ['key' => $key, 'label' => $label, 'status' => 'ok', 'detail' => "Exists: {$path}"];
+        }
+
+        if (! @mkdir($path, 0775, true) && ! is_dir($path)) {
+            $reason = error_get_last()['message'] ?? 'unknown error';
+
+            return ['key' => $key, 'label' => $label, 'status' => 'error', 'detail' => "Could not create {$path}: {$reason}"];
+        }
+
+        return ['key' => $key, 'label' => $label, 'status' => 'created', 'detail' => "Created: {$path}"];
+    }
+
+    /**
+     * Probe symlink support with a throwaway link — this is the single biggest deploy-time
+     * surprise, so we surface it up front (a host without symlinks falls back to copy-swap).
+     */
+    private function probeSymlink(string $base): array
+    {
+        $label = 'Symlink support';
+
+        if (! function_exists('symlink')) {
+            return ['key' => 'symlink', 'label' => $label, 'status' => 'warning', 'detail' => 'symlink() is disabled — deploys will use the slower, non-atomic copy-swap activation.'];
+        }
+
+        $probe = rtrim($base, '/').'/.cporter-symlink-probe-'.bin2hex(random_bytes(4));
+        $ok = @symlink($base, $probe);
+        if (is_link($probe) || file_exists($probe)) {
+            @unlink($probe);
+        }
+
+        return $ok
+            ? ['key' => 'symlink', 'label' => $label, 'status' => 'ok', 'detail' => 'Symlinks work — atomic release activation is enabled.']
+            : ['key' => 'symlink', 'label' => $label, 'status' => 'warning', 'detail' => 'Could not create a symlink — deploys will use the slower, non-atomic copy-swap activation.'];
+    }
+
+    /** Inspect the `current` symlink without creating it (nothing to point at pre-deploy). */
+    private function currentCheck(string $projectBasePath): array
+    {
+        $label = 'current symlink';
+        $current = $this->jailedLeaf($this->trailingChild($projectBasePath, 'current'));
+
+        if (is_link($current)) {
+            $target = $this->currentTarget($projectBasePath);
+            if ($target !== null && is_dir($target)) {
+                return ['key' => 'current', 'label' => $label, 'status' => 'ok', 'detail' => 'Points to the active release: '.basename($target)];
+            }
+
+            return ['key' => 'current', 'label' => $label, 'status' => 'warning', 'detail' => 'Dangling symlink — points to a release that no longer exists. The next deploy repairs it.'];
+        }
+
+        if (is_dir($current)) {
+            return ['key' => 'current', 'label' => $label, 'status' => 'ok', 'detail' => 'Present as a directory (copy-swap mode).'];
+        }
+
+        return ['key' => 'current', 'label' => $label, 'status' => 'pending', 'detail' => 'Not created yet — cPorter creates it on the first successful deploy. Do not create it by hand.'];
+    }
+
+    /**
+     * Flag shared FILE entries that are absent from shared/. Directories are auto-created and
+     * files may be seeded from the artifact, but a shared file with no artifact source (e.g.
+     * shared/.env) must be created by the operator or the deploy fails at link_shared.
+     */
+    private function sharedFilesCheck(string $shared, array $sharedPaths): array
+    {
+        $label = 'Shared files';
+        $missing = [];
+
+        foreach ($sharedPaths as $entry) {
+            [$rel, $type] = $this->sharedEntry($entry);
+            if ($rel === '' || $type !== 'file') {
+                continue;
+            }
+            $path = $shared.'/'.$rel;
+            if (! file_exists($path) && ! is_link($path)) {
+                $missing[] = 'shared/'.$rel;
+            }
+        }
+
+        if ($missing === []) {
+            return ['key' => 'shared_files', 'label' => $label, 'status' => 'ok', 'detail' => 'No shared files are missing.'];
+        }
+
+        return [
+            'key' => 'shared_files',
+            'label' => $label,
+            'status' => 'warning',
+            'detail' => 'Create these on the server before deploying (cPorter never fabricates secret/config files): '.implode(', ', $missing),
+        ];
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────────
 
     private function safeSlug(string $slug): string

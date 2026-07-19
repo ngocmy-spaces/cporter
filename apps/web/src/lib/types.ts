@@ -159,6 +159,21 @@ export interface Capabilities {
   allowed_base_paths: CapabilityBasePath[];
 }
 
+export type PreflightStatus = 'ok' | 'created' | 'pending' | 'warning' | 'error' | 'manual';
+
+export interface PreflightCheck {
+  key: string;
+  label: string;
+  status: PreflightStatus;
+  detail: string;
+}
+
+export interface PreflightReport {
+  ok: boolean;
+  base_path: string;
+  checks: PreflightCheck[];
+}
+
 /** Envelope every cPorter API response is wrapped in. */
 export interface ApiEnvelope<T> {
   data: T;
