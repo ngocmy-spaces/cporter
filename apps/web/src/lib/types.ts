@@ -52,6 +52,11 @@ export interface Artifact {
   uploaded_at: string | null;
 }
 
+export interface SharedPath {
+  path: string;
+  type: 'file' | 'dir';
+}
+
 export interface Project {
   id: number;
   name: string;
@@ -62,7 +67,7 @@ export interface Project {
   php_binary: string | null;
   keep_releases: number;
   health_check_url: string | null;
-  shared_paths: string[];
+  shared_paths: SharedPath[];
   hooks: Record<string, unknown> | null;
   status: ProjectStatus;
   created_at: string;

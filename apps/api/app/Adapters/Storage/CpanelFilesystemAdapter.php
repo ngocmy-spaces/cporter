@@ -145,22 +145,33 @@ class CpanelFilesystemAdapter implements StorageAdapter
         $releaseJail = new PathJail([$release]);
         $sharedJail = new PathJail([$shared]);
 
-        foreach ($sharedPaths as $rel) {
-            if (! is_string($rel) || $rel === '') {
+        foreach ($sharedPaths as $entry) {
+            [$rel, $type] = $this->sharedEntry($entry);
+            if ($rel === '') {
                 continue;
             }
 
             $releasePath = $releaseJail->assertInside($release.'/'.$rel);
             $sharedPath = $sharedJail->assertInside($shared.'/'.$rel);
 
-            // Seed shared/ from what the artifact shipped (first deploy), else create a dir.
+            // Seed shared/ from what the artifact shipped (first deploy), else create per
+            // the declared type: a directory for 'dir', but never an empty file for 'file'
+            // — an empty secret/config would let the app boot broken, so require the
+            // operator to create it in shared/ first (docs/SPEC.md §12, §17).
             if (! file_exists($sharedPath) && ! is_link($sharedPath)) {
-                $this->ensureParent($sharedPath);
                 if (file_exists($releasePath)) {
+                    $this->ensureParent($sharedPath);
                     if (! @rename($releasePath, $sharedPath)) {
                         throw new StorageException("Failed to seed shared path: {$rel}");
                     }
+                } elseif ($type === 'file') {
+                    // Fail before touching the filesystem so a missing shared file leaves no
+                    // stray parent directory behind — the operator must create it in shared/.
+                    throw new StorageException(
+                        "Shared file '{$rel}' is missing — create ".basename($shared)."/{$rel} on the server before deploying."
+                    );
                 } elseif (! @mkdir($sharedPath, 0775, true) && ! is_dir($sharedPath)) {
+                    // mkdir(recursive) creates any missing parent directories itself.
                     throw new StorageException("Failed to create shared path: {$rel}");
                 }
             }
@@ -286,6 +297,29 @@ class CpanelFilesystemAdapter implements StorageAdapter
     private function trailingChild(string $base, string $child): string
     {
         return rtrim($base, '/').'/'.$child;
+    }
+
+    /**
+     * Normalize a shared-paths entry to [relativePath, type]. Accepts a bare string
+     * (legacy — a directory) or a {path, type} pair; unknown types fall back to 'dir'.
+     *
+     * @param  mixed  $entry
+     * @return array{0: string, 1: string}
+     */
+    private function sharedEntry($entry): array
+    {
+        if (is_string($entry)) {
+            return [$entry, 'dir'];
+        }
+
+        if (is_array($entry)) {
+            $rel = is_string($entry['path'] ?? null) ? $entry['path'] : '';
+            $type = ($entry['type'] ?? 'dir') === 'file' ? 'file' : 'dir';
+
+            return [$rel, $type];
+        }
+
+        return ['', 'dir'];
     }
 
     /**

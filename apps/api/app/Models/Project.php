@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\ProjectStatus;
 use App\Enums\ProjectType;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -47,10 +48,53 @@ class Project extends Model
         return [
             'type' => ProjectType::class,
             'status' => ProjectStatus::class,
-            'shared_paths' => 'array',
             'hooks' => 'array',
             'keep_releases' => 'integer',
         ];
+    }
+
+    /**
+     * shared_paths is stored as a JSON list of {path, type} objects (type: 'file'|'dir'),
+     * telling the deploy engine whether a missing shared entry should be seeded as a file
+     * or a directory (docs/SPEC.md §6 step 8). Legacy bare-string entries (e.g. ".env")
+     * are accepted and normalized to type 'dir' — the pre-typed default — on both read and
+     * write, so old rows and old API clients keep working without a migration.
+     */
+    protected function sharedPaths(): Attribute
+    {
+        return Attribute::make(
+            get: fn (?string $value): array => self::normalizeSharedPaths(json_decode($value ?? '[]', true) ?: []),
+            set: fn ($value): string => (string) json_encode(self::normalizeSharedPaths($value)),
+        );
+    }
+
+    /**
+     * @param  mixed  $raw
+     * @return list<array{path: string, type: string}>
+     */
+    public static function normalizeSharedPaths($raw): array
+    {
+        $out = [];
+
+        foreach (is_array($raw) ? $raw : [] as $item) {
+            if (is_string($item)) {
+                $path = trim($item);
+                $type = 'dir';
+            } elseif (is_array($item)) {
+                $path = trim((string) ($item['path'] ?? ''));
+                $type = ($item['type'] ?? 'dir') === 'file' ? 'file' : 'dir';
+            } else {
+                continue;
+            }
+
+            if ($path === '') {
+                continue;
+            }
+
+            $out[] = ['path' => $path, 'type' => $type];
+        }
+
+        return $out;
     }
 
     public function getRouteKeyName(): string

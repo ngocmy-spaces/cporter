@@ -40,7 +40,7 @@ class ProjectController extends Controller
             'keep_releases' => ['nullable', 'integer', 'min:1', 'max:50'],
             'health_check_url' => ['nullable', 'url'],
             'shared_paths' => ['array'],
-            'shared_paths.*' => ['string', 'max:255'],
+            'shared_paths.*' => [$this->sharedPathRule()],
             'hooks' => ['nullable', 'array'],
         ]);
 
@@ -62,6 +62,38 @@ class ProjectController extends Controller
         app(\App\Domain\Audit\AuditLogger::class)->record('project.created', $project, ['slug' => $project->slug]);
 
         return response()->json(['data' => $project], 201);
+    }
+
+    /**
+     * Each shared_paths entry may be a bare relative path (legacy — treated as a
+     * directory) or a {path, type} pair where type is 'file' or 'dir'. The model
+     * normalizes both shapes to {path, type} before persisting.
+     */
+    private function sharedPathRule(): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail): void {
+            if (is_string($value)) {
+                if (trim($value) === '' || strlen($value) > 255) {
+                    $fail('Each shared path must be a non-empty string of at most 255 characters.');
+                }
+
+                return;
+            }
+
+            if (is_array($value)) {
+                $path = $value['path'] ?? null;
+                if (! is_string($path) || trim($path) === '' || strlen($path) > 255) {
+                    $fail('Each shared path requires a non-empty "path" of at most 255 characters.');
+                }
+                if (! in_array($value['type'] ?? 'dir', ['file', 'dir'], true)) {
+                    $fail('Shared path "type" must be "file" or "dir".');
+                }
+
+                return;
+            }
+
+            $fail('Each shared path must be a string or an object with "path" and "type".');
+        };
     }
 
     private function uniqueSlug(string $slug): string

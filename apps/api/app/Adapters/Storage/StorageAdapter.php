@@ -23,7 +23,12 @@ interface StorageAdapter
     /**
      * Symlink shared paths from $sharedDir into $releaseDir.
      *
-     * @param list<string> $sharedPaths e.g. ['.env', 'storage']
+     * Each entry is either a bare relative path (legacy — treated as a directory) or
+     * a {path, type} pair where type is 'file' or 'dir'. The type disambiguates how a
+     * shared entry absent from both the release and shared/ is seeded.
+     *
+     * @param list<string|array{path: string, type: string}> $sharedPaths
+     *        e.g. [['path' => '.env', 'type' => 'file'], ['path' => 'storage', 'type' => 'dir']]
      */
     public function linkShared(string $releaseDir, string $sharedDir, array $sharedPaths): void;
 
