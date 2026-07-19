@@ -83,14 +83,16 @@ it('seeds a typed file entry as a file, not a directory', function () {
 it('refuses to create an empty shared file when the artifact ships none', function () {
     $shared = $this->root.'/shared';
 
-    // Release does NOT ship .env and shared/.env does not exist → must fail loudly
-    // instead of silently creating a directory (or an empty secret file).
+    // Release does NOT ship the file and shared/ does not have it → must fail loudly
+    // instead of silently creating a directory (or an empty secret file). Using a nested
+    // path also asserts the failed attempt leaves no stray parent directory behind.
     $r1 = ($this->mkRelease)('r1');
 
-    expect(fn () => $this->adapter->linkShared($r1, $shared, [['path' => '.env', 'type' => 'file']]))
+    expect(fn () => $this->adapter->linkShared($r1, $shared, [['path' => 'config/app.env', 'type' => 'file']]))
         ->toThrow(App\Domain\Storage\StorageException::class);
 
-    expect(file_exists($shared.'/.env'))->toBeFalse();
+    expect(file_exists($shared.'/config/app.env'))->toBeFalse()
+        ->and(is_dir($shared.'/config'))->toBeFalse(); // no stray parent dir on the error path
 });
 
 it('reuses an operator-created shared file across releases', function () {

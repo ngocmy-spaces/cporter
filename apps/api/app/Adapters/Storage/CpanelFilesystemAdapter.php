@@ -159,16 +159,19 @@ class CpanelFilesystemAdapter implements StorageAdapter
             // — an empty secret/config would let the app boot broken, so require the
             // operator to create it in shared/ first (docs/SPEC.md §12, §17).
             if (! file_exists($sharedPath) && ! is_link($sharedPath)) {
-                $this->ensureParent($sharedPath);
                 if (file_exists($releasePath)) {
+                    $this->ensureParent($sharedPath);
                     if (! @rename($releasePath, $sharedPath)) {
                         throw new StorageException("Failed to seed shared path: {$rel}");
                     }
                 } elseif ($type === 'file') {
+                    // Fail before touching the filesystem so a missing shared file leaves no
+                    // stray parent directory behind — the operator must create it in shared/.
                     throw new StorageException(
                         "Shared file '{$rel}' is missing — create ".basename($shared)."/{$rel} on the server before deploying."
                     );
                 } elseif (! @mkdir($sharedPath, 0775, true) && ! is_dir($sharedPath)) {
+                    // mkdir(recursive) creates any missing parent directories itself.
                     throw new StorageException("Failed to create shared path: {$rel}");
                 }
             }
