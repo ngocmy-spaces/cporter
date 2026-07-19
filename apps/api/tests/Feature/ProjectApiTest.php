@@ -401,3 +401,92 @@ it('rejects a non-string hook command', function () {
         ->assertStatus(422)
         ->assertJsonValidationErrors('hooks');
 });
+
+it('clones a project config into a new project without copying releases', function () {
+    $source = Project::factory()->laravel()->create([
+        'slug' => 'shop',
+        'base_path' => $this->base.'/shop',
+        'keep_releases' => 7,
+    ]);
+    $source->releases()->create(['version' => '1.0.0', 'path' => $this->base.'/shop/releases/1', 'state' => 'active']);
+
+    $this->actingAs($this->admin)->postJson('/api/v1/projects/shop/clone', [
+        'name' => 'Shop Staging',
+        'base_path' => $this->base.'/shop-staging',
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.name', 'Shop Staging')
+        ->assertJsonPath('data.slug', 'shop-staging')
+        ->assertJsonPath('data.type', 'laravel')
+        ->assertJsonPath('data.keep_releases', 7)
+        ->assertJsonPath('data.status', 'active');
+
+    $clone = Project::where('slug', 'shop-staging')->first();
+    expect($clone->releases()->count())->toBe(0);
+    expect($clone->hooks)->toBe($source->hooks);
+    expect($clone->shared_paths)->toBe($source->shared_paths);
+    expect($clone->id)->not->toBe($source->id);
+});
+
+it('clones as active even when the source is disabled', function () {
+    Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base.'/shop', 'status' => 'disabled']);
+
+    $this->actingAs($this->admin)->postJson('/api/v1/projects/shop/clone', [
+        'name' => 'Copy',
+        'base_path' => $this->base.'/copy',
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.status', 'active');
+});
+
+it('rejects a clone whose base_path is already in use', function () {
+    Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base.'/shop']);
+
+    $this->actingAs($this->admin)->postJson('/api/v1/projects/shop/clone', [
+        'name' => 'Copy',
+        'base_path' => $this->base.'/shop',
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('base_path');
+});
+
+it('rejects a clone whose base_path is outside the jail', function () {
+    Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base.'/shop']);
+
+    $this->actingAs($this->admin)->postJson('/api/v1/projects/shop/clone', [
+        'name' => 'Copy',
+        'base_path' => '/etc/evil',
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('base_path');
+});
+
+it('records an audit entry for a clone', function () {
+    Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base.'/shop']);
+
+    $this->actingAs($this->admin)->postJson('/api/v1/projects/shop/clone', [
+        'name' => 'Copy',
+        'base_path' => $this->base.'/copy',
+    ])->assertCreated();
+
+    $this->assertDatabaseHas('audit_logs', ['action' => 'project.cloned']);
+});
+
+it('requires admin auth to clone a project', function () {
+    Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base.'/shop']);
+
+    $this->postJson('/api/v1/projects/shop/clone', ['name' => 'x', 'base_path' => $this->base.'/x'])
+        ->assertUnauthorized();
+});
+
+it('rejects creating a project at a base_path already in use', function () {
+    Project::factory()->create(['base_path' => $this->base]);
+
+    $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+        'name' => 'Dup',
+        'base_path' => $this->base,
+        'type' => 'static',
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('base_path');
+});

@@ -105,9 +105,71 @@ class ProjectController extends Controller
             'hooks' => ['nullable', 'array', $this->hooksRule()],
         ]);
 
+        $result = $this->persistProject($data, $jail, $storage, 'project.created');
+
+        return response()->json(['data' => $result['project'], 'preflight' => $result['preflight']], 201);
+    }
+
+    /**
+     * Duplicate an existing project's configuration into a new project (docs/SPEC.md §5). Copies
+     * type/docroot/php_binary/keep_releases/health_check_url/shared_paths/hooks; the caller supplies
+     * a new name + base_path (+ optional slug). No releases/deployments/artifacts are copied — the
+     * clone is a fresh project that starts `active` with no live release until its first deploy.
+     * `shared_paths` of type `file` are copied as config; their contents are NOT — preflight will
+     * flag them as missing on the new folder so the operator can seed them.
+     */
+    public function clone(Request $request, Project $project, PathJail $jail, StorageAdapter $storage): JsonResponse
+    {
+        $input = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'slug' => ['nullable', 'string', 'alpha_dash', 'max:255', 'unique:projects,slug'],
+            'base_path' => ['required', 'string', 'max:1024'],
+        ]);
+
+        $data = [
+            'name' => $input['name'],
+            'slug' => $input['slug'] ?? null,
+            'base_path' => $input['base_path'],
+            'type' => $project->type,
+            'docroot_subpath' => $project->docroot_subpath,
+            'php_binary' => $project->php_binary,
+            'keep_releases' => $project->keep_releases,
+            'health_check_url' => $project->health_check_url,
+            'shared_paths' => $project->shared_paths,
+            'hooks' => $project->hooks,
+            'status' => ProjectStatus::Active,
+        ];
+
+        $result = $this->persistProject($data, $jail, $storage, 'project.cloned', [
+            'source_slug' => $project->slug,
+            'source_id' => $project->id,
+        ]);
+
+        return response()->json(['data' => $result['project'], 'preflight' => $result['preflight']], 201);
+    }
+
+    /**
+     * Shared create path for store() + clone(): the base_path must be inside the jail and not
+     * already used by another live project (two projects deploying to one folder would clash);
+     * assign a unique slug, persist, audit, and scaffold + probe host readiness so setup errors
+     * surface now rather than at first deploy. Lenient: the project is created regardless — the
+     * preflight report tells the operator what (if anything) still needs a manual cPanel-side fix.
+     *
+     * @param  array<string, mixed>  $data  validated attributes (must include name + base_path)
+     * @param  array<string, mixed>  $auditMeta  extra audit metadata merged onto {slug}
+     * @return array{project: Project, preflight: array<string, mixed>}
+     */
+    private function persistProject(array $data, PathJail $jail, StorageAdapter $storage, string $auditAction, array $auditMeta = []): array
+    {
         if (! $jail->isInside($data['base_path'])) {
             throw ValidationException::withMessages([
                 'base_path' => 'base_path must be within an allowed base path (CPORTER_ALLOWED_BASE_PATHS).',
+            ]);
+        }
+
+        if (Project::query()->where('base_path', $data['base_path'])->exists()) {
+            throw ValidationException::withMessages([
+                'base_path' => 'Another project already uses this base_path.',
             ]);
         }
 
@@ -115,14 +177,11 @@ class ProjectController extends Controller
 
         $project = Project::create($data);
 
-        app(AuditLogger::class)->record('project.created', $project, ['slug' => $project->slug]);
+        app(AuditLogger::class)->record($auditAction, $project, ['slug' => $project->slug] + $auditMeta);
 
-        // Scaffold releases/ + shared/ and probe host readiness now, so setup errors surface here
-        // rather than at first deploy. Lenient: the project is created regardless — the report tells
-        // the operator what (if anything) still needs a manual fix on the cPanel side.
         $preflight = $this->runPreflight($project, $storage);
 
-        return response()->json(['data' => $project->fresh(), 'preflight' => $preflight], 201);
+        return ['project' => $project->fresh(), 'preflight' => $preflight];
     }
 
     /**
