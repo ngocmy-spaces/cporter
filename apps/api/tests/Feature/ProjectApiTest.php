@@ -102,6 +102,35 @@ it('lists and shows projects', function () {
         ->assertJsonPath('data.slug', 'shop');
 });
 
+it('includes active_release and last_deployment summaries in show', function () {
+    $project = Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base]);
+    $release = $project->releases()->create([
+        'version' => '2.1.0',
+        'path' => $this->base.'/releases/1',
+        'state' => 'active',
+        'activated_at' => now(),
+    ]);
+    $project->deployments()->create([
+        'release_id' => $release->id,
+        'trigger' => 'api',
+        'status' => 'success',
+    ]);
+
+    $this->actingAs($this->admin)->getJson('/api/v1/projects/shop')
+        ->assertOk()
+        ->assertJsonPath('data.active_release.version', '2.1.0')
+        ->assertJsonPath('data.last_deployment.status', 'success');
+});
+
+it('returns null summaries in show when a project has no releases or deploys', function () {
+    Project::factory()->create(['slug' => 'fresh', 'base_path' => $this->base]);
+
+    $this->actingAs($this->admin)->getJson('/api/v1/projects/fresh')
+        ->assertOk()
+        ->assertJsonPath('data.active_release', null)
+        ->assertJsonPath('data.last_deployment', null);
+});
+
 it('requires admin auth to manage projects', function () {
     $this->postJson('/api/v1/projects', [
         'name' => 'x', 'base_path' => $this->base, 'type' => 'static',

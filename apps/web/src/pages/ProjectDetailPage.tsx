@@ -278,24 +278,31 @@ export function ProjectDetailPage() {
     refetchInterval: (q) => (q.state.data?.disk_usage_status === 'running' ? 2500 : false),
   });
 
+  // Each tab list loads lazily — only when its tab is the active one — and then auto-refreshes
+  // on an interval while that tab stays open (react-query only polls while a query is enabled, so
+  // switching away stops the polling and switching back resumes it). The Overview card no longer
+  // depends on these lists; it reads the `active_release` / `last_deployment` summaries the
+  // project `show` payload embeds, so entering the page fires only the single project request.
   const deployments = useQuery({
     queryKey: ['projects', slug, 'deployments'],
     queryFn: async () =>
       (await api.get<ApiEnvelope<Deployment[]>>(`/projects/${slug}/deployments`)).data.data,
-    enabled: !!slug,
+    enabled: !!slug && activeTab === 'deployments',
+    refetchInterval: activeTab === 'deployments' ? 5000 : false,
   });
 
   const releases = useQuery({
     queryKey: ['projects', slug, 'releases'],
     queryFn: async () => (await api.get<ApiEnvelope<Release[]>>(`/projects/${slug}/releases`)).data.data,
-    enabled: !!slug,
+    enabled: !!slug && activeTab === 'releases',
+    refetchInterval: activeTab === 'releases' ? 10000 : false,
   });
 
   const activity = useQuery({
     queryKey: ['projects', slug, 'activity'],
     queryFn: async () => (await api.get<ApiEnvelope<AuditLog[]>>(`/projects/${slug}/activity`)).data.data,
-    // Deferred: only fetched once the Activity tab is actually opened.
     enabled: !!slug && activeTab === 'activity',
+    refetchInterval: activeTab === 'activity' ? 10000 : false,
   });
 
   const activate = useMutation({
@@ -307,8 +314,9 @@ export function ProjectDetailPage() {
         message: 'The release is now active.',
         icon: <IconCheck size={16} />,
       });
-      queryClient.invalidateQueries({ queryKey: ['projects', slug, 'releases'] });
-      queryClient.invalidateQueries({ queryKey: ['projects', slug, 'deployments'] });
+      // Prefix invalidation refreshes the project payload (Overview's live-release/last-deploy
+      // summaries) plus the releases/deployments/activity tab lists in one call.
+      queryClient.invalidateQueries({ queryKey: ['projects', slug] });
       queryClient.invalidateQueries({ queryKey: ['deployments'] });
     },
     onError: (error) => {
@@ -562,8 +570,11 @@ export function ProjectDetailPage() {
 
   const p = project.data;
   const releaseList = releases.data ?? [];
-  const activeRelease = releaseList.find((r) => r.state === 'active') ?? null;
-  const lastDeployment = (deployments.data ?? [])[0] ?? null;
+  // Overview reads the summaries embedded in the project payload (not the lazy tab lists) so the
+  // Deployments/Releases requests only fire when their tab is opened.
+  const activeRelease = p.active_release ?? null;
+  const lastDeployment = p.last_deployment ?? null;
+  const hasReleases = (p.release_count ?? 0) > 0;
   const diskBusy = p.disk_usage_status === 'running' || recomputeDisk.isPending;
 
   const noBasePaths = !capabilities.isLoading && allowedBasePaths.length === 0;
@@ -1000,13 +1011,13 @@ export function ProjectDetailPage() {
             <Select
               label="Type"
               description={
-                releaseList.length > 0
+                hasReleases
                   ? 'Frozen once the project has releases.'
                   : 'Static, PHP & WordPress deploy fully in web PHP (no shell). Laravel & Node also run shell steps (migrate, build, restart) via the cron worker.'
               }
               data={PROJECT_TYPES}
               required
-              disabled={releaseList.length > 0}
+              disabled={hasReleases}
               {...editForm.getInputProps('type')}
             />
             <TextInput

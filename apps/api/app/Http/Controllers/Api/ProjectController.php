@@ -7,6 +7,7 @@ use App\Domain\Audit\AuditLogger;
 use App\Domain\Storage\PathJail;
 use App\Enums\ProjectStatus;
 use App\Enums\ProjectType;
+use App\Enums\ReleaseState;
 use App\Http\Controllers\Controller;
 use App\Jobs\PurgeProjectJob;
 use App\Jobs\RecomputeDiskUsageJob;
@@ -63,7 +64,24 @@ class ProjectController extends Controller
 
     public function show(Project $project): JsonResponse
     {
-        return response()->json(['data' => $project]);
+        // Summary bits the detail page's Overview needs up front, so the per-tab
+        // deployments / releases / activity lists can each load lazily (only when their
+        // tab is opened) instead of all firing on page entry.
+        $activeRelease = $project->releases()
+            ->where('state', ReleaseState::Active->value)
+            ->latest('activated_at')
+            ->first();
+
+        $lastDeployment = $project->deployments()->latest()->first();
+
+        $data = $project->toArray();
+        $data['active_release'] = $activeRelease?->only(['id', 'version', 'activated_at']);
+        $data['last_deployment'] = $lastDeployment?->only(['id', 'status', 'created_at']);
+        // Lets the UI keep freezing identity fields (type/base_path) once releases exist without
+        // having to load the full — now lazily fetched — releases list.
+        $data['release_count'] = $project->releases()->count();
+
+        return response()->json(['data' => $data]);
     }
 
     /**

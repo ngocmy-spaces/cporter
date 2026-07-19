@@ -86,6 +86,11 @@ export interface Project {
   hooks: ProjectHooks | null;
   status: ProjectStatus;
   created_at: string;
+  /** Overview summaries embedded by `show` so the detail tabs can load lazily; null when none. */
+  active_release?: { id: number; version: string; activated_at: string | null } | null;
+  last_deployment?: { id: number; status: DeploymentStatus; created_at: string } | null;
+  /** Total releases; lets the UI freeze identity fields without loading the (lazy) releases list. */
+  release_count?: number;
 }
 
 export interface DeploymentStep {
