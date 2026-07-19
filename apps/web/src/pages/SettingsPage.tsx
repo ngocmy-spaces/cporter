@@ -45,9 +45,9 @@ export function SettingsPage() {
     <Stack gap="lg">
       <Group justify="space-between">
         <div>
-          <Title order={2}>Settings</Title>
+          <Title order={2}>System</Title>
           <Text c="dimmed" size="sm">
-            Last probed {formatDateTime(capabilities.data?.probed_at)}
+            Host capabilities — last probed {formatDateTime(capabilities.data?.probed_at)}
           </Text>
         </div>
         {isAdmin && (

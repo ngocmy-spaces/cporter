@@ -42,9 +42,9 @@ export function LogsPage() {
   return (
     <Stack gap="lg">
       <div>
-        <Title order={2}>Audit log</Title>
+        <Title order={2}>Activity</Title>
         <Text c="dimmed" size="sm">
-          Who did what across cPorter — projects, releases, API keys, users.
+          Audit trail — who did what across cPorter: projects, releases, API keys, users.
         </Text>
       </div>
 

@@ -10,9 +10,8 @@ import {
   IconLayoutDashboard,
   IconLogout,
   IconRocket,
-  IconSettings,
+  IconServer,
   IconUsers,
-  IconVersions,
 } from '@tabler/icons-react';
 import { useAuth } from '@/lib/auth';
 import { ColorSchemeToggle } from '@/components/ColorSchemeToggle';
@@ -22,17 +21,22 @@ type NavItem = {
   label: string;
   end?: boolean;
   icon: ComponentType<{ size?: number; stroke?: number }>;
+  adminOnly?: boolean;
 };
 
-const NAV: NavItem[] = [
+/** Primary, everyday operations — shown flat at the top of the navbar. */
+const MAIN_NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', end: true, icon: IconLayoutDashboard },
   { to: '/projects', label: 'Projects', icon: IconFolders },
   { to: '/deployments', label: 'Deployments', icon: IconRocket },
-  { to: '/releases', label: 'Releases', icon: IconVersions },
-  { to: '/logs', label: 'Logs', icon: IconFileText },
-  { to: '/settings', label: 'Settings', icon: IconSettings },
-  { to: '/users', label: 'Users', icon: IconUsers },
+];
+
+/** Governance & introspection — grouped under an "Admin" section. */
+const ADMIN_NAV: NavItem[] = [
+  { to: '/activity', label: 'Activity', icon: IconFileText },
+  { to: '/users', label: 'Users', icon: IconUsers, adminOnly: true },
   { to: '/api-keys', label: 'API Keys', icon: IconKey },
+  { to: '/system', label: 'System', icon: IconServer },
 ];
 
 function UserMenu() {
@@ -64,7 +68,22 @@ export function Layout() {
   const { user } = useAuth();
   const [mobileOpened, { toggle: toggleMobile, close: closeMobile }] = useDisclosure(false);
   const isActive = (item: NavItem) => (item.end ? pathname === item.to : pathname.startsWith(item.to));
-  const navItems = NAV.filter((item) => item.to !== '/users' || user?.role === 'admin');
+  const isVisible = (item: NavItem) => !item.adminOnly || user?.role === 'admin';
+  const renderNav = (item: NavItem) => {
+    const Icon = item.icon;
+    return (
+      <NavLink
+        key={item.to}
+        component={Link}
+        to={item.to}
+        label={item.label}
+        leftSection={<Icon size={18} stroke={1.5} />}
+        active={isActive(item)}
+        onClick={closeMobile}
+      />
+    );
+  };
+  const adminNav = ADMIN_NAV.filter(isVisible);
 
   return (
     <AppShell
@@ -106,20 +125,11 @@ export function Layout() {
       </AppShell.Header>
 
       <AppShell.Navbar p="xs">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <NavLink
-              key={item.to}
-              component={Link}
-              to={item.to}
-              label={item.label}
-              leftSection={<Icon size={18} stroke={1.5} />}
-              active={isActive(item)}
-              onClick={closeMobile}
-            />
-          );
-        })}
+        {MAIN_NAV.map(renderNav)}
+        <Text size="xs" tt="uppercase" fw={700} c="dimmed" px="sm" mt="md" mb={4}>
+          Admin
+        </Text>
+        {adminNav.map(renderNav)}
       </AppShell.Navbar>
 
       <AppShell.Main>

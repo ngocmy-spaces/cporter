@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   Anchor,
   Badge,
   Breadcrumbs,
   Button,
+  Card,
   Code,
   Group,
   Loader,
   Paper,
+  SimpleGrid,
   Stack,
   Table,
   Tabs,
@@ -18,7 +20,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconX } from '@tabler/icons-react';
+import { IconCheck, IconExternalLink, IconX } from '@tabler/icons-react';
 import axios from 'axios';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -110,6 +112,9 @@ export function ProjectDetailPage() {
   }
 
   const p = project.data;
+  const releaseList = releases.data ?? [];
+  const activeRelease = releaseList.find((r) => r.state === 'active') ?? null;
+  const lastDeployment = (deployments.data ?? [])[0] ?? null;
 
   return (
     <Stack gap="lg">
@@ -120,7 +125,7 @@ export function ProjectDetailPage() {
         <Text size="sm">{p.name}</Text>
       </Breadcrumbs>
 
-      <Group justify="space-between">
+      <Group justify="space-between" align="flex-start">
         <div>
           <Title order={2}>{p.name}</Title>
           <Text c="dimmed" size="sm">
@@ -128,6 +133,14 @@ export function ProjectDetailPage() {
           </Text>
         </div>
         <Group gap="xs">
+          {p.health_check_url && (
+            <Anchor href={p.health_check_url} target="_blank" rel="noreferrer" size="sm">
+              <Group gap={4} wrap="nowrap">
+                <IconExternalLink size={14} />
+                Health URL
+              </Group>
+            </Anchor>
+          )}
           <Badge variant="light">{p.type}</Badge>
           <Badge color={p.status === 'active' ? 'green' : 'gray'} variant="light">
             {p.status}
@@ -135,27 +148,79 @@ export function ProjectDetailPage() {
         </Group>
       </Group>
 
-      <Paper withBorder radius="md" p="md">
-        <Title order={4} mb="xs">
-          Shared paths
-        </Title>
-        {p.shared_paths && p.shared_paths.length > 0 ? (
-          <Stack gap="xs">
-            {p.shared_paths.map((sp, index) => (
-              <Group key={`${sp.path}-${index}`} justify="space-between" wrap="nowrap">
-                <Code>{sp.path}</Code>
-                <Badge color={sp.type === 'dir' ? 'blue' : 'grape'} variant="light">
-                  {sp.type}
-                </Badge>
-              </Group>
-            ))}
-          </Stack>
-        ) : (
-          <Text c="dimmed" size="sm">
-            No shared paths configured.
+      <SimpleGrid cols={{ base: 1, md: 2 }}>
+        <Card withBorder radius="md" p="md">
+          <Text fw={600} mb="sm">
+            Overview
           </Text>
-        )}
-      </Paper>
+          <Stack gap="xs">
+            <Info label="Live release">
+              {activeRelease ? (
+                <Group gap="xs" wrap="nowrap">
+                  <Text size="sm" fw={500}>
+                    {activeRelease.version}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {formatRelativeTime(activeRelease.activated_at)}
+                  </Text>
+                </Group>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  None active
+                </Text>
+              )}
+            </Info>
+            <Info label="Last deploy">
+              {lastDeployment ? (
+                <Group gap="xs" wrap="nowrap">
+                  <DeploymentStatusBadge status={lastDeployment.status} />
+                  <Text size="xs" c="dimmed">
+                    {formatRelativeTime(lastDeployment.created_at)}
+                  </Text>
+                </Group>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  —
+                </Text>
+              )}
+            </Info>
+            <Info label="Docroot subpath">
+              <Text size="sm">{p.docroot_subpath || '—'}</Text>
+            </Info>
+            <Info label="Keep releases">
+              <Text size="sm">{p.keep_releases}</Text>
+            </Info>
+            <Info label="PHP binary">
+              <Text size="sm">{p.php_binary || '—'}</Text>
+            </Info>
+            <Info label="Created">
+              <Text size="sm">{formatDateTime(p.created_at)}</Text>
+            </Info>
+          </Stack>
+        </Card>
+
+        <Card withBorder radius="md" p="md">
+          <Text fw={600} mb="sm">
+            Shared paths
+          </Text>
+          {p.shared_paths && p.shared_paths.length > 0 ? (
+            <Stack gap="xs">
+              {p.shared_paths.map((sp, index) => (
+                <Group key={`${sp.path}-${index}`} justify="space-between" wrap="nowrap">
+                  <Code>{sp.path}</Code>
+                  <Badge color={sp.type === 'dir' ? 'blue' : 'grape'} variant="light">
+                    {sp.type}
+                  </Badge>
+                </Group>
+              ))}
+            </Stack>
+          ) : (
+            <Text c="dimmed" size="sm">
+              No shared paths configured.
+            </Text>
+          )}
+        </Card>
+      </SimpleGrid>
 
       <Tabs defaultValue="deployments">
         <Tabs.List>
@@ -229,18 +294,38 @@ export function ProjectDetailPage() {
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {(releases.data ?? []).map((r) => (
-                      <Table.Tr key={r.id}>
-                        <Table.Td>{r.version}</Table.Td>
+                    {releaseList.map((r) => (
+                      <Table.Tr
+                        key={r.id}
+                        bg={r.state === 'active' ? 'var(--mantine-color-green-light)' : undefined}
+                      >
+                        <Table.Td>
+                          <Group gap="xs" wrap="nowrap">
+                            <Text size="sm" fw={r.state === 'active' ? 600 : 400}>
+                              {r.version}
+                            </Text>
+                            {r.state === 'active' && (
+                              <Badge size="xs" color="green" variant="filled">
+                                live
+                              </Badge>
+                            )}
+                          </Group>
+                        </Table.Td>
                         <Table.Td>
                           <ReleaseStateBadge state={r.state} />
                         </Table.Td>
                         <Table.Td>{formatDateTime(r.activated_at)}</Table.Td>
                         <Table.Td>
-                          {r.state !== 'active' && isAdmin && (
-                            <Button size="xs" variant="light" onClick={() => confirmActivate(r)}>
-                              Activate
-                            </Button>
+                          {r.state === 'active' ? (
+                            <Text size="xs" c="dimmed">
+                              current
+                            </Text>
+                          ) : (
+                            isAdmin && (
+                              <Button size="xs" variant="light" onClick={() => confirmActivate(r)}>
+                                Activate
+                              </Button>
+                            )
                           )}
                         </Table.Td>
                       </Table.Tr>
@@ -264,5 +349,16 @@ export function ProjectDetailPage() {
 
       <DeploymentDrawer deploymentId={selectedDeployment} onClose={() => setSelectedDeployment(null)} />
     </Stack>
+  );
+}
+
+function Info({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Group justify="space-between" gap="xs" wrap="nowrap">
+      <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
+        {label}
+      </Text>
+      {children}
+    </Group>
   );
 }
