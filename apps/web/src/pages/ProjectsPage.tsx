@@ -26,7 +26,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { DeploymentStatusBadge } from '@/components/StatusBadge';
-import { formatRelativeTime } from '@/lib/format';
+import { formatBytes, formatRelativeTime } from '@/lib/format';
 import type { ApiEnvelope, Capabilities, Deployment, Project, SharedPath } from '@/lib/types';
 
 const PROJECT_TYPES = [
@@ -247,13 +247,15 @@ export function ProjectsPage() {
             )}
           </Stack>
         ) : (
-          <Table.ScrollContainer minWidth={760}>
+          <Table.ScrollContainer minWidth={900}>
             <Table highlightOnHover verticalSpacing="sm">
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Name</Table.Th>
                   <Table.Th>Type</Table.Th>
                   <Table.Th>Base path</Table.Th>
+                  <Table.Th>Live size</Table.Th>
+                  <Table.Th>Releases</Table.Th>
                   <Table.Th>Last deploy</Table.Th>
                   <Table.Th>Status</Table.Th>
                 </Table.Tr>
@@ -280,6 +282,12 @@ export function ProjectsPage() {
                         </Text>
                       </Table.Td>
                       <Table.Td>
+                        <Text size="sm">{formatBytes(p.disk_usage)}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{formatBytes(p.releases_disk_usage)}</Text>
+                      </Table.Td>
+                      <Table.Td>
                         {last ? (
                           <Stack gap={2}>
                             <DeploymentStatusBadge status={last.status} />
@@ -304,7 +312,7 @@ export function ProjectsPage() {
                 })}
                 {filtered.length === 0 && (
                   <Table.Tr>
-                    <Table.Td colSpan={5}>
+                    <Table.Td colSpan={7}>
                       <Text c="dimmed" size="sm" ta="center" py="sm">
                         No projects match the current filters.
                       </Text>

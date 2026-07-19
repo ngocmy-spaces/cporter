@@ -26,6 +26,10 @@ class Project extends Model
         'php_binary',
         'keep_releases',
         'disk_usage',
+        'releases_disk_usage',
+        'disk_usage_status',
+        'disk_usage_started_at',
+        'disk_usage_calculated_at',
         'health_check_url',
         'shared_paths',
         'hooks',
@@ -52,6 +56,9 @@ class Project extends Model
             'hooks' => 'array',
             'keep_releases' => 'integer',
             'disk_usage' => 'integer',
+            'releases_disk_usage' => 'integer',
+            'disk_usage_started_at' => 'datetime',
+            'disk_usage_calculated_at' => 'datetime',
         ];
     }
 

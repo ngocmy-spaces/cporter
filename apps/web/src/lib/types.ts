@@ -66,7 +66,13 @@ export interface Project {
   docroot_subpath: string | null;
   php_binary: string | null;
   keep_releases: number;
+  /** Live footprint in bytes: active release (`current`) + shared/. */
   disk_usage: number;
+  /** Total bytes of all retained release directories (rollback history). */
+  releases_disk_usage: number;
+  disk_usage_status: 'idle' | 'running';
+  disk_usage_started_at: string | null;
+  disk_usage_calculated_at: string | null;
   health_check_url: string | null;
   shared_paths: SharedPath[];
   hooks: Record<string, unknown> | null;

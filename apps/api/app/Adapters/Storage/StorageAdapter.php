@@ -40,10 +40,14 @@ interface StorageAdapter
     public function pruneReleases(string $projectBasePath, int $keep): array;
 
     /**
-     * Total bytes of the project's retained release directories (<base_path>/releases).
-     * Symlinks (shared/, current) are not followed, so shared content is not double-counted.
+     * Compute the project's on-disk footprint in bytes. Symlinks are never followed, so
+     * shared content (symlinked into each release) is counted once, under `current`.
+     *
+     * @return array{current: int, releases: int}
+     *   current  = the live release (via `current`) plus shared/ — what the site occupies now
+     *   releases = every retained release directory under releases/ (rollback history)
      */
-    public function diskUsage(string $projectBasePath): int;
+    public function diskStats(string $projectBasePath): array;
 
     /** Acquire the per-project deploy lock (atomic O_EXCL). Returns false if already locked. */
     public function acquireLock(string $projectBasePath): bool;

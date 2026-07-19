@@ -20,7 +20,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconExternalLink, IconX } from '@tabler/icons-react';
+import { IconCheck, IconExternalLink, IconRefresh, IconX } from '@tabler/icons-react';
 import axios from 'axios';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -40,6 +40,10 @@ export function ProjectDetailPage() {
     queryKey: ['projects', slug],
     queryFn: async () => (await api.get<ApiEnvelope<Project>>(`/projects/${slug}`)).data.data,
     enabled: !!slug,
+    // While a disk-usage recompute runs on the server, poll until it settles. This resumes
+    // automatically on a fresh page load if a run is still in flight — no client-side handle
+    // to lose — so a reload keeps tracking the same job instead of starting a new one.
+    refetchInterval: (q) => (q.state.data?.disk_usage_status === 'running' ? 2500 : false),
   });
 
   const deployments = useQuery({
@@ -81,6 +85,27 @@ export function ProjectDetailPage() {
     },
   });
 
+  const recomputeDisk = useMutation({
+    mutationFn: async () =>
+      (await api.post<ApiEnvelope<Project>>(`/projects/${slug}/disk-usage/recompute`)).data.data,
+    onSuccess: (updated) => {
+      // Seed the returned 'running' status so the poller (refetchInterval) starts immediately
+      // and the button shows loading without waiting for the next scheduled refetch.
+      queryClient.setQueryData(['projects', slug], updated);
+    },
+    onError: (error) => {
+      const message = axios.isAxiosError(error)
+        ? (error.response?.data as { error?: string } | undefined)?.error
+        : undefined;
+      notifications.show({
+        color: 'red',
+        title: 'Recalculation failed',
+        message: message ?? 'Could not start disk usage recalculation.',
+        icon: <IconX size={16} />,
+      });
+    },
+  });
+
   const confirmActivate = (release: Release) => {
     modals.openConfirmModal({
       title: 'Activate release',
@@ -115,6 +140,7 @@ export function ProjectDetailPage() {
   const releaseList = releases.data ?? [];
   const activeRelease = releaseList.find((r) => r.state === 'active') ?? null;
   const lastDeployment = (deployments.data ?? [])[0] ?? null;
+  const diskBusy = p.disk_usage_status === 'running' || recomputeDisk.isPending;
 
   return (
     <Stack gap="lg">
@@ -190,8 +216,34 @@ export function ProjectDetailPage() {
             <Info label="Keep releases">
               <Text size="sm">{p.keep_releases}</Text>
             </Info>
-            <Info label="Disk usage">
-              <Text size="sm">{formatBytes(p.disk_usage)}</Text>
+            <Info label="Live size">
+              <Text size="sm">
+                {formatBytes(p.disk_usage)}{' '}
+                <Text span size="xs" c="dimmed">
+                  (current + shared)
+                </Text>
+              </Text>
+            </Info>
+            <Info label="Releases stored">
+              <Text size="sm">{formatBytes(p.releases_disk_usage)}</Text>
+            </Info>
+            <Info label="Disk stats">
+              <Group gap="xs" wrap="nowrap">
+                <Button
+                  size="compact-xs"
+                  variant="light"
+                  leftSection={<IconRefresh size={14} />}
+                  loading={diskBusy}
+                  onClick={() => recomputeDisk.mutate()}
+                >
+                  {diskBusy ? 'Recalculating…' : 'Recalculate'}
+                </Button>
+                <Text size="xs" c="dimmed">
+                  {p.disk_usage_calculated_at
+                    ? `updated ${formatRelativeTime(p.disk_usage_calculated_at)}`
+                    : 'not calculated yet'}
+                </Text>
+              </Group>
             </Info>
             <Info label="PHP binary">
               <Text size="sm">{p.php_binary || '—'}</Text>

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Domain\Storage\PathJail;
 use App\Enums\ProjectType;
 use App\Http\Controllers\Controller;
+use App\Jobs\RecomputeDiskUsageJob;
 use App\Models\Project;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,6 +27,29 @@ class ProjectController extends Controller
     public function show(Project $project): JsonResponse
     {
         return response()->json(['data' => $project]);
+    }
+
+    /**
+     * Kick off a disk-usage recompute for one project (docs/SPEC.md §11). Idempotent: if a
+     * recompute is already in flight it is left alone (repeat clicks / page reloads are safe),
+     * except when the prior run is stale (worker likely died) — then it is re-dispatched.
+     * Returns 202 with the project so the UI can poll `disk_usage_status` to completion.
+     */
+    public function recomputeDiskUsage(Project $project): JsonResponse
+    {
+        $stale = $project->disk_usage_started_at !== null
+            && $project->disk_usage_started_at->lt(now()->subMinutes(10));
+
+        if ($project->disk_usage_status !== 'running' || $stale) {
+            $project->forceFill([
+                'disk_usage_status' => 'running',
+                'disk_usage_started_at' => now(),
+            ])->save();
+
+            RecomputeDiskUsageJob::dispatch($project);
+        }
+
+        return response()->json(['data' => $project->fresh()], 202);
     }
 
     public function store(Request $request, PathJail $jail): JsonResponse

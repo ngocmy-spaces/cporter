@@ -229,14 +229,23 @@ class CpanelFilesystemAdapter implements StorageAdapter
         return $removed;
     }
 
-    public function diskUsage(string $projectBasePath): int
+    public function diskStats(string $projectBasePath): array
     {
         $releasesDir = $this->jailedLeaf($this->trailingChild($projectBasePath, 'releases'));
-        if (! is_dir($releasesDir)) {
-            return 0;
+        $sharedDir = $this->jailedLeaf($this->trailingChild($projectBasePath, 'shared'));
+
+        $releases = is_dir($releasesDir) ? $this->dirBytes($releasesDir) : 0;
+
+        $current = 0;
+        $active = $this->currentTarget($projectBasePath); // resolves `current` -> release dir
+        if ($active !== null && is_dir($active)) {
+            $current += $this->dirBytes($active); // active release's own files (shared symlinks skipped)
+        }
+        if (is_dir($sharedDir)) {
+            $current += $this->dirBytes($sharedDir); // real shared data, counted once
         }
 
-        return $this->dirBytes($releasesDir);
+        return ['current' => $current, 'releases' => $releases];
     }
 
     /** Recursively sum real file sizes under $dir, never following symlinks. */
