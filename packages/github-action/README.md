@@ -21,7 +21,7 @@ jobs:
       # …build steps that produce ./out.zip…
 
       - name: Deploy to cPorter
-        uses: cporter/deploy-action@v1
+        uses: ngocmy-spaces/cporter/packages/github-action@v1
         with:
           host: ${{ secrets.CPORTER_HOST }}
           token: ${{ secrets.CPORTER_TOKEN }}
@@ -58,7 +58,7 @@ variables → Actions). The token needs the `deploy` scope (and `read` to wait f
 ```yaml
       - name: Deploy to cPorter
         id: cporter
-        uses: cporter/deploy-action@v1
+        uses: ngocmy-spaces/cporter/packages/github-action@v1
         with: { host: ${{ secrets.CPORTER_HOST }}, token: ${{ secrets.CPORTER_TOKEN }}, project: my-site, artifact: ./out.zip }
       - run: echo "Deployed ${{ steps.cporter.outputs.release-version }} (#${{ steps.cporter.outputs.deployment-id }})"
 ```
