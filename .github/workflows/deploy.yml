@@ -1,7 +1,7 @@
 name: Deploy cPorter
 
 # Self-deploy cPorter to its cPanel host via the cPorter GitHub Action (docs/SPEC.md §14).
-# Configure repo secrets: CPORTER_HOST (e.g. https://deploy.domain) and CPORTER_TOKEN (an
+# Configure repo secrets: CPORTER_HOST (e.g. https://cporter.domain) and CPORTER_TOKEN (an
 # API key with the `deploy` scope, plus `read` so the action can wait for status).
 # The target project slug is set inline below (`project:`).
 #

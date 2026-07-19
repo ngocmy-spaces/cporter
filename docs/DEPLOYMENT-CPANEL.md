@@ -1,19 +1,19 @@
 # Deploying cPorter to cPanel
 
-cPorter installs like a normal web app on one domain (`deploy.domain`) and then deploys your
+cPorter installs like a normal web app on one domain (`cporter.domain`) and then deploys your
 *other* domains. This guide covers the **one-time manual bootstrap** (cPorter can't deploy
 itself before it exists) and day-2 operation. See also [SPEC §14](SPEC.md).
 
-Replace `USER` with your cPanel username and `deploy.domain` with your control-panel domain.
+Replace `USER` with your cPanel username and `cporter.domain` with your control-panel domain.
 
 ---
 
 ## 1. Prerequisites (in cPanel)
 
-1. **Subdomain** — create `deploy.domain`. Set its **Document Root** to
-   `deploy.domain/current/public` (Domains ▸ create/manage → Document Root). It'll 404 until
+1. **Subdomain** — create `cporter.domain`. Set its **Document Root** to
+   `cporter.domain/current/public` (Domains ▸ create/manage → Document Root). It'll 404 until
    the first release exists — that's fine.
-2. **PHP 8.3** for that domain — *MultiPHP Manager* → set `deploy.domain` to `ea-php83`.
+2. **PHP 8.3** for that domain — *MultiPHP Manager* → set `cporter.domain` to `ea-php83`.
    Note the CLI path (usually `/opt/cpanel/ea-php83/root/usr/bin/php`).
 3. **MySQL** — *MySQL® Databases*: create a database (`USER_cporter`) + user, add the user to
    the DB with **ALL PRIVILEGES**.
@@ -48,7 +48,7 @@ The zip is the Laravel app (`apps/api`) with `vendor/` and the built SPA in `pub
 Open **Terminal**/SSH and run (adjust paths):
 
 ```bash
-cd ~/deploy.domain
+cd ~/cporter.domain
 mkdir -p releases shared
 
 # 3a. Upload cporter-<version>.zip here (File Manager or scp), then extract into a release:
@@ -60,14 +60,14 @@ unzip -q cporter-*.zip -d releases/$REL      # if `unzip` missing, extract via F
 cp -r releases/$REL/storage shared/storage 2>/dev/null || true
 ```
 
-Create **`~/deploy.domain/shared/.env`** (production):
+Create **`~/cporter.domain/shared/.env`** (production):
 
 ```dotenv
 APP_NAME=cPorter
 APP_ENV=production
 APP_KEY=
 APP_DEBUG=false
-APP_URL=https://deploy.domain
+APP_URL=https://cporter.domain
 
 LOG_CHANNEL=stack
 LOG_LEVEL=warning
@@ -99,7 +99,7 @@ CPORTER_WEBHOOK_SECRET=
 Link shared into the release, generate the key, migrate + seed, then activate:
 
 ```bash
-cd ~/deploy.domain
+cd ~/cporter.domain
 PHP=/opt/cpanel/ea-php83/root/usr/bin/php
 
 ln -sfn ../../shared/.env      releases/$REL/.env
@@ -111,12 +111,12 @@ $PHP artisan migrate --force --seed
 $PHP artisan config:cache
 
 # 3c. Activate this release (atomic symlink)
-cd ~/deploy.domain
+cd ~/cporter.domain
 ln -sfn releases/$REL current
 ```
 
-Confirm the domain's Document Root is `deploy.domain/current/public` (step 1). Open
-**https://deploy.domain** → log in with the admin from `.env`. ✅
+Confirm the domain's Document Root is `cporter.domain/current/public` (step 1). Open
+**https://cporter.domain** → log in with the admin from `.env`. ✅
 
 ---
 
@@ -125,7 +125,7 @@ Confirm the domain's Document Root is `deploy.domain/current/public` (step 1). O
 *cPanel ▸ Cron Jobs* → add, every minute:
 
 ```
-* * * * * cd /home/USER/deploy.domain/current && /opt/cpanel/ea-php83/root/usr/bin/php artisan schedule:run >> /dev/null 2>&1
+* * * * * cd /home/USER/cporter.domain/current && /opt/cpanel/ea-php83/root/usr/bin/php artisan schedule:run >> /dev/null 2>&1
 ```
 
 This fans out to `cporter:run-jobs` (finalize Laravel deploys), `queue:work` (artifact
@@ -156,9 +156,9 @@ For each site cPorter will deploy, set that domain's **Document Root**:
 2. **API Keys ▸ New key** (scope `deploy`, `read`, optionally `rollback`) → copy the token.
 3. Deploy from CI or Postman:
    - **GitHub Actions**: use the cPorter Action (`uses: ngocmy-spaces/cporter/packages/github-action@v1`),
-     set repo secrets `CPORTER_HOST=https://deploy.domain` + `CPORTER_TOKEN=<key>`, and pass the project
+     set repo secrets `CPORTER_HOST=https://cporter.domain` + `CPORTER_TOKEN=<key>`, and pass the project
      as the `project:` input (slug). See [docs/RELEASING.md](RELEASING.md#consuming-from-another-repo).
-   - **Manual/Postman**: `POST https://deploy.domain/api/v1/projects/<slug>/deployments`
+   - **Manual/Postman**: `POST https://cporter.domain/api/v1/projects/<slug>/deployments`
      with `Authorization: Bearer <key>` + multipart `artifact` (.zip) + `sha256`. Full contract: [docs/API.md](API.md).
 
 Laravel deploys return `202 hooks_pending`; the cron finalizes (migrate → activate → health)
@@ -171,7 +171,7 @@ within ~1 minute. Static deploys finish immediately.
 No Terminal/SSH? Run the one-time setup via a **temporary cron job** instead of interactively:
 
 ```
-* * * * * cd /home/USER/deploy.domain/releases/REL && /opt/cpanel/ea-php83/root/usr/bin/php artisan migrate --force --seed >> /home/USER/cporter-install.log 2>&1
+* * * * * cd /home/USER/cporter.domain/releases/REL && /opt/cpanel/ea-php83/root/usr/bin/php artisan migrate --force --seed >> /home/USER/cporter-install.log 2>&1
 ```
 
 Wait one minute, check the log, then **delete that cron**. Do `key:generate` by setting a
@@ -184,7 +184,7 @@ most hosts; otherwise the first `schedule:run` cron gives you a shell entry to r
 ## 8. Upgrading cPorter later
 
 Once running, cPorter can deploy **itself**: register a project with
-`base_path=/home/USER/deploy.domain`, `type=laravel`, `docroot_subpath=public`,
+`base_path=/home/USER/cporter.domain`, `type=laravel`, `docroot_subpath=public`,
 `shared_paths=[".env","storage"]`, hooks `["artisan migrate --force","artisan config:cache"]`.
 Then push new artifacts to it like any other project (careful — a bad release takes the panel
 down until rollback). Until you set that up, repeat §2–§3 with a new `releases/<id>` + swap

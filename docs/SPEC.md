@@ -21,7 +21,7 @@ Operating model:
 
 - The user has already created addon domains / subdomains on cPanel, each pointing its document root to
   a folder under `/home/<user>/` (e.g. `learn.domain`, `shop.domain`, `api.domain`).
-- cPorter installs itself into a dedicated domain (`deploy.domain`) and becomes the "control plane" responsible for:
+- cPorter installs itself into a dedicated domain (`cporter.domain`) and becomes the "control plane" responsible for:
   receiving artifacts from CI, extracting them, managing releases, atomically swapping the `current` symlink, health checks,
   rollback — for **all** the remaining project domains.
 - CI (GitHub Actions / GitLab CI / Jenkins / anything) only needs to **build an artifact and call cPorter's HTTP API**.
@@ -99,7 +99,7 @@ This section drives the design. cPanel shared hosting is very different from a V
                     +----------+-----------+
                                | HTTPS  (API token / HMAC webhook)
                                v
-   ============================ cPorter (deploy.domain) ============================
+   ============================ cPorter (cporter.domain) ============================
    |                                                                              |
    |   +------------+     +-------------+     +------------------+                 |
    |   | Deploy API |     | Admin Panel |     | Scheduler (cron) |                 |
@@ -157,7 +157,7 @@ and easy to extend to other environments (SSH adapter, S3 artifact store…).
 │
 ├── shop.domain/  …
 ├── api.domain/   …
-└── deploy.domain/           # <-- cPorter (also deployed via the same mechanism)
+└── cporter.domain/           # <-- cPorter (also deployed via the same mechanism)
     ├── current -> releases/…
     ├── releases/…
     ├── shared/{.env, storage/, database.sqlite?}
@@ -204,7 +204,7 @@ cporter/
 
 **"One folder, one domain" strategy**: the FE is built into static files and placed into Laravel's `apps/api/public/`.
 Laravel serves `/api/*` as a JSON API and falls back every other route to the SPA's `index.html`. The domain docroot
-= `deploy.domain/current/public`.
+= `cporter.domain/current/public`.
 
 ---
 
@@ -269,7 +269,7 @@ auto-rollback if already activated, and always `finally { unlock }`.
 > admin-session only; no `Location` header; `meta` not emitted). The table below is the original design
 > sketch; where it disagrees with API.md, API.md wins. See §20.
 
-Base: `https://deploy.domain/api/v1` · Auth: `Authorization: Bearer <token>`
+Base: `https://cporter.domain/api/v1` · Auth: `Authorization: Bearer <token>`
 
 | Method | Path | Description |
 |---|---|---|
@@ -361,7 +361,7 @@ cPorter runs a probe and stores it in Settings, displaying it in the Admin panel
 
 ## 10. Scheduler / Cron
 
-- **One** cPanel cron job (e.g. every minute) calls `GET/POST https://deploy.domain/cron/tick` (internal token).
+- **One** cPanel cron job (e.g. every minute) calls `GET/POST https://cporter.domain/cron/tick` (internal token).
 - `cron/tick` handles: running `queue:work --stop-when-empty` (if using the DB queue), pruning expired releases,
   timing out stuck deployments (cleaning up stale locks), retrying health checks on schedule, running scheduled tasks.
 - The cron can be created automatically via the **cPanel UAPI** at setup (if available), or via manual instructions.
@@ -428,7 +428,7 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 
 - cPorter is Laravel + React → it uses the exact same release/symlink mechanism.
 - **First bootstrap**: install manually (upload the first build, create `.env` in `shared/`, run migrate,
-  set the docroot to `deploy.domain/current/public`). This is chicken-and-egg, so step 0 is done by hand.
+  set the docroot to `cporter.domain/current/public`). This is chicken-and-egg, so step 0 is done by hand.
 - Afterward: cPorter can **self-deploy** via its own API (a special `self` project) — with caution,
   done in a later phase.
 - Sample CI (`.github/workflows/deploy.yml`) builds the artifact then calls the API.

@@ -43,7 +43,7 @@ Build them all: `pnpm build:packages`. End-user guides live in the app's public 
 area.
 
 On deploy: `apps/web` builds to static → copied into `apps/api/public`; Laravel serves `/api/v1/*` as JSON
-and falls back other routes to the SPA. The cPanel docroot points to `deploy.domain/current/public`.
+and falls back other routes to the SPA. The cPanel docroot points to `cporter.domain/current/public`.
 
 ## Dev environment requirements
 
@@ -100,7 +100,7 @@ Web PHP can't run shell commands, so a single cPanel cron drives the cron-worker
 Laravel hooks, processes staging jobs, cleans up). Add one cron entry:
 
 ```cron
-* * * * * cd /home/<user>/deploy.domain/current && php artisan schedule:run >> /dev/null 2>&1
+* * * * * cd /home/<user>/cporter.domain/current && php artisan schedule:run >> /dev/null 2>&1
 ```
 
 It fans out (see `apps/api/routes/console.php`) to `cporter:run-jobs` (finalize Laravel

@@ -10,7 +10,7 @@ Artisan::command('inspire', function () {
 
 /*
 | Scheduler (docs/SPEC.md §10). ONE cPanel cron drives everything:
-|   * * * * * cd /home/<user>/deploy.domain/current && php artisan schedule:run >> /dev/null 2>&1
+|   * * * * * cd /home/<user>/cporter.domain/current && php artisan schedule:run >> /dev/null 2>&1
 | That shell context lets the cron-worker run target-app hooks that web PHP cannot.
 */
 // Finalize Laravel deploys (run hooks → activate → health) — the cron shell context.

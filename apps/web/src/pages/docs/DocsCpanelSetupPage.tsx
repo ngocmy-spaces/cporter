@@ -9,7 +9,7 @@ pnpm install
 pnpm build:artifact        # builds web → copies into apps/api/public → zips apps/api
 # → build/out/cporter-<version>.zip  (+ prints sha256)`;
 
-const EXTRACT = `cd ~/deploy.domain
+const EXTRACT = `cd ~/cporter.domain
 mkdir -p releases shared
 
 # Upload cporter-<version>.zip here (File Manager or scp), then extract into a release:
@@ -21,7 +21,7 @@ const ENV = `APP_NAME=cPorter
 APP_ENV=production
 APP_KEY=
 APP_DEBUG=false
-APP_URL=https://deploy.domain
+APP_URL=https://cporter.domain
 
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
@@ -42,7 +42,7 @@ CPORTER_COMMAND_DRIVER=cron-worker
 CPORTER_ADMIN_EMAIL=you@example.com
 CPORTER_ADMIN_PASSWORD=change-me-now`;
 
-const ACTIVATE = `cd ~/deploy.domain
+const ACTIVATE = `cd ~/cporter.domain
 PHP=/opt/cpanel/ea-php83/root/usr/bin/php
 
 # Link shared files (persist across releases)
@@ -56,10 +56,10 @@ $PHP artisan migrate --force --seed
 $PHP artisan config:cache
 
 # Activate this release (atomic symlink)
-cd ~/deploy.domain
+cd ~/cporter.domain
 ln -sfn releases/$REL current`;
 
-const CRON = `* * * * * cd /home/USER/deploy.domain/current && /opt/cpanel/ea-php83/root/usr/bin/php artisan schedule:run >> /dev/null 2>&1`;
+const CRON = `* * * * * cd /home/USER/cporter.domain/current && /opt/cpanel/ea-php83/root/usr/bin/php artisan schedule:run >> /dev/null 2>&1`;
 
 interface FixRow {
   symptom: string;
@@ -87,10 +87,10 @@ export function DocsCpanelSetupPage() {
       </div>
 
       <Text size="sm">
-        cPorter installs like a normal web app on one domain (<code>deploy.domain</code>) and then
+        cPorter installs like a normal web app on one domain (<code>cporter.domain</code>) and then
         deploys your <em>other</em> domains under the same cPanel account. It needs <strong>no
         root</strong>: cPanel runs PHP as your account user, so it can manage sibling folders.
-        Replace <code>USER</code> with your cPanel username and <code>deploy.domain</code> with your
+        Replace <code>USER</code> with your cPanel username and <code>cporter.domain</code> with your
         control-panel domain throughout.
       </Text>
 
@@ -105,11 +105,11 @@ export function DocsCpanelSetupPage() {
         </Title>
         <List size="sm" spacing="sm">
           <List.Item>
-            <strong>Subdomain</strong> — create <code>deploy.domain</code> and set its Document Root to{' '}
-            <code>deploy.domain/current/public</code>. It 404s until the first release exists — that's fine.
+            <strong>Subdomain</strong> — create <code>cporter.domain</code> and set its Document Root to{' '}
+            <code>cporter.domain/current/public</code>. It 404s until the first release exists — that's fine.
           </List.Item>
           <List.Item>
-            <strong>PHP 8.3</strong> — MultiPHP Manager → set <code>deploy.domain</code> to{' '}
+            <strong>PHP 8.3</strong> — MultiPHP Manager → set <code>cporter.domain</code> to{' '}
             <code>ea-php83</code>. Note the CLI path (usually{' '}
             <code>/opt/cpanel/ea-php83/root/usr/bin/php</code>).
           </List.Item>
@@ -144,7 +144,7 @@ export function DocsCpanelSetupPage() {
         </Text>
         <CodeBlock label="bash · extract into a release" code={EXTRACT} />
         <Text size="sm" mt="md" mb="sm">
-          Create <code>~/deploy.domain/shared/.env</code> (production — keep secrets here, never in the
+          Create <code>~/cporter.domain/shared/.env</code> (production — keep secrets here, never in the
           artifact):
         </Text>
         <CodeBlock label="dotenv · shared/.env" code={ENV} />
@@ -153,8 +153,8 @@ export function DocsCpanelSetupPage() {
         </Text>
         <CodeBlock label="bash · migrate & activate" code={ACTIVATE} />
         <Text size="sm" mt="md">
-          Confirm the Document Root is <code>deploy.domain/current/public</code>, then open{' '}
-          <strong>https://deploy.domain</strong> and log in with the admin from <code>.env</code>. ✅
+          Confirm the Document Root is <code>cporter.domain/current/public</code>, then open{' '}
+          <strong>https://cporter.domain</strong> and log in with the admin from <code>.env</code>. ✅
         </Text>
       </Card>
 
