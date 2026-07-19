@@ -61,6 +61,52 @@ it('links shared paths and persists them across releases', function () {
     expect(file_get_contents($r2.'/.env'))->toBe('APP=1'); // shared wins
 });
 
+it('seeds a typed file entry as a file, not a directory', function () {
+    $shared = $this->root.'/shared';
+
+    // Artifact ships .env → it is seeded into shared/ as a FILE.
+    $r1 = ($this->mkRelease)('r1');
+    File::put($r1.'/.env', 'APP=1');
+
+    $this->adapter->linkShared($r1, $shared, [
+        ['path' => '.env', 'type' => 'file'],
+        ['path' => 'storage', 'type' => 'dir'],
+    ]);
+
+    expect(is_file($shared.'/.env'))->toBeTrue()
+        ->and(is_dir($shared.'/.env'))->toBeFalse()   // regression: never a folder
+        ->and(is_link($r1.'/.env'))->toBeTrue()
+        ->and(file_get_contents($r1.'/.env'))->toBe('APP=1')
+        ->and(is_dir($shared.'/storage'))->toBeTrue();
+});
+
+it('refuses to create an empty shared file when the artifact ships none', function () {
+    $shared = $this->root.'/shared';
+
+    // Release does NOT ship .env and shared/.env does not exist → must fail loudly
+    // instead of silently creating a directory (or an empty secret file).
+    $r1 = ($this->mkRelease)('r1');
+
+    expect(fn () => $this->adapter->linkShared($r1, $shared, [['path' => '.env', 'type' => 'file']]))
+        ->toThrow(App\Domain\Storage\StorageException::class);
+
+    expect(file_exists($shared.'/.env'))->toBeFalse();
+});
+
+it('reuses an operator-created shared file across releases', function () {
+    $shared = $this->root.'/shared';
+
+    // Operator bootstraps shared/.env by hand (the recommended flow).
+    File::makeDirectory($shared, 0777, true, true);
+    File::put($shared.'/.env', 'APP=prod');
+
+    $r1 = ($this->mkRelease)('r1');
+    $this->adapter->linkShared($r1, $shared, [['path' => '.env', 'type' => 'file']]);
+
+    expect(is_link($r1.'/.env'))->toBeTrue()
+        ->and(file_get_contents($r1.'/.env'))->toBe('APP=prod');
+});
+
 it('prunes old releases but never the active one', function () {
     foreach (['r1', 'r2', 'r3', 'r4', 'r5'] as $i => $id) {
         $dir = ($this->mkRelease)($id);

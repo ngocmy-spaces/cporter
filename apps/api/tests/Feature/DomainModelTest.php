@@ -19,9 +19,31 @@ it('casts enums and JSON, and uses slug as route key', function () {
 
     expect($project->type)->toBe(ProjectType::Laravel)
         ->and($project->type->requiresCommandRunner())->toBeTrue()
-        ->and($project->shared_paths)->toBe(['.env', 'storage'])
+        ->and($project->shared_paths)->toBe([
+            ['path' => '.env', 'type' => 'dir'],
+            ['path' => 'storage', 'type' => 'dir'],
+        ])
         ->and($project->hooks)->toBeArray()
         ->and($project->getRouteKeyName())->toBe('slug');
+});
+
+it('normalizes shared_paths to {path,type}, defaulting legacy strings to dir', function () {
+    $project = Project::factory()->create([
+        'shared_paths' => [
+            '.env',                                   // legacy string → dir
+            ['path' => 'storage', 'type' => 'dir'],
+            ['path' => 'public/.env', 'type' => 'file'],
+            ['path' => '', 'type' => 'file'],         // dropped (empty path)
+            ['type' => 'file'],                       // dropped (no path)
+            42,                                       // dropped (not string/array)
+        ],
+    ]);
+
+    expect($project->fresh()->shared_paths)->toBe([
+        ['path' => '.env', 'type' => 'dir'],
+        ['path' => 'storage', 'type' => 'dir'],
+        ['path' => 'public/.env', 'type' => 'file'],
+    ]);
 });
 
 it('wires up all project relationships', function () {
