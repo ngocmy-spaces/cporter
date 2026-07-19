@@ -40,6 +40,7 @@ Route::prefix('v1')->group(function () {
 
             // ── Reads (admin + viewer) ──
             Route::get('/system/capabilities', [SystemController::class, 'capabilities']);
+            Route::get('/system/cron', [SystemController::class, 'cron']);
             Route::get('/api-keys', [ApiKeyController::class, 'index']);
             Route::get('/projects', [ProjectController::class, 'index']);
             Route::get('/projects/{project}', [ProjectController::class, 'show']);

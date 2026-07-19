@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Domain\System\CapabilityProbe;
+use App\Domain\System\CronHeartbeat;
 use App\Http\Controllers\Controller;
 use App\Models\Setting;
 use Illuminate\Http\JsonResponse;
@@ -28,6 +29,12 @@ class SystemController extends Controller
     public function refreshCapabilities(CapabilityProbe $probe): JsonResponse
     {
         return $this->respond($this->probeAndStore($probe));
+    }
+
+    /** Cron liveness + cadence mode from the heartbeat store (docs/SPEC.md §10). */
+    public function cron(CronHeartbeat $heartbeat): JsonResponse
+    {
+        return response()->json(['data' => $heartbeat->status()]);
     }
 
     /**
