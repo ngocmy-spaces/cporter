@@ -85,7 +85,7 @@ export function Layout() {
           </Group>
           <Group gap="sm">
             <Badge variant="light" color="gray">
-              v0.1.0 · Phase 0
+              v0.1.0
             </Badge>
             <Tooltip label="Documentation">
               <ActionIcon
