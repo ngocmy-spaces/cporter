@@ -9,9 +9,22 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 /*
-| Scheduler (docs/SPEC.md §10). ONE cPanel cron drives everything:
-|   * * * * * cd /home/<user>/cporter.domain/current && php artisan schedule:run >> /dev/null 2>&1
-| That shell context lets the cron-worker run target-app hooks that web PHP cannot.
+| Scheduler (docs/SPEC.md §10).
+|
+| Two supported cron setups depending on the host's minimum cron cadence:
+|
+| A) Host allows 1-minute cron — ONE cron drives the Laravel scheduler:
+|      * * * * * cd /home/<user>/cporter.domain/current && php artisan schedule:run >> /dev/null 2>&1
+|    The everyMinute() tasks below then finalize deploys within ~1 min.
+|
+| B) Host caps cron at 5 minutes (common on cPanel) — call the internal-loop worker directly
+|    on a 5-minute cron. It loops in-process so latency stays ~seconds instead of ~5 min:
+|      [every 5 min] cd /home/<user>/cporter.domain/current && php artisan cporter:work >> /dev/null 2>&1
+|    (cporter:work runs run-jobs + queue:work + housekeep on its own inner loop; when using it
+|    you do NOT also need the schedule:run cron.) See docs/DEPLOYMENT-CPANEL.md for the crontab.
+|
+| Either way the work runs in cron's shell context, so target-app hooks that web PHP cannot
+| run (proc_open) execute there. See docs/DEPLOYMENT-CPANEL.md §"Cron".
 */
 // Finalize Laravel deploys (run hooks → activate → health) — the cron shell context.
 Schedule::command('cporter:run-jobs')->everyMinute()->withoutOverlapping();
