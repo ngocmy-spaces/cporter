@@ -1,10 +1,11 @@
 name: Deploy cPorter
 
-# Self-deploy cPorter to its cPanel host via the Deploy API (docs/SPEC.md §14).
-# Configure repo secrets: CPORTER_URL (e.g. https://deploy.domain), CPORTER_TOKEN (an API
-# key with the `deploy` scope), CPORTER_PROJECT (target project slug, e.g. `self`).
+# Self-deploy cPorter to its cPanel host via the cPorter GitHub Action (docs/SPEC.md §14).
+# Configure repo secrets: CPORTER_HOST (e.g. https://deploy.domain) and CPORTER_TOKEN (an
+# API key with the `deploy` scope, plus `read` so the action can wait for status).
+# The target project slug is set inline below (`project:`).
 #
-# This is also the template CI any project can copy: build → package .zip → POST to cPorter.
+# This is also the template CI any project can copy: build → package .zip → deploy action.
 
 on:
   push:
@@ -51,19 +52,16 @@ jobs:
         run: pnpm build:artifact
 
       - name: Deploy to cPorter
-        env:
-          CPORTER_URL: ${{ secrets.CPORTER_URL }}
-          CPORTER_TOKEN: ${{ secrets.CPORTER_TOKEN }}
-          CPORTER_PROJECT: ${{ secrets.CPORTER_PROJECT }}
+        id: deploy
+        uses: ngocmy-spaces/cporter/packages/github-action@v1
+        with:
+          host: ${{ secrets.CPORTER_HOST }}
+          token: ${{ secrets.CPORTER_TOKEN }}
+          project: cporter
+          artifact: ${{ steps.artifact.outputs.artifact }}
+          version: ${{ steps.artifact.outputs.version }}
+
+      - name: Deployment summary
         run: |
-          set -euo pipefail
-          echo "Deploying ${{ steps.artifact.outputs.artifact }} (sha256 ${{ steps.artifact.outputs.sha256 }})"
-          http_code=$(curl -sS -o response.json -w '%{http_code}' \
-            -X POST "${CPORTER_URL}/api/v1/projects/${CPORTER_PROJECT}/deployments" \
-            -H "Authorization: Bearer ${CPORTER_TOKEN}" \
-            -H "Idempotency-Key: ${{ github.sha }}" \
-            -F "artifact=@${{ steps.artifact.outputs.artifact }};type=application/zip" \
-            -F "sha256=${{ steps.artifact.outputs.sha256 }}" \
-            -F "version=${{ steps.artifact.outputs.version }}")
-          echo "HTTP ${http_code}"; cat response.json
-          [ "${http_code}" = "202" ] || [ "${http_code}" = "200" ]
+          echo "Deployed ${{ steps.deploy.outputs.release-version }} \
+          (#${{ steps.deploy.outputs.deployment-id }}) — status ${{ steps.deploy.outputs.status }}"
