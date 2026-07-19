@@ -1,4 +1,5 @@
 import {
+  ActionIcon,
   Badge,
   Button,
   Group,
@@ -9,7 +10,6 @@ import {
   Select,
   Stack,
   Table,
-  TagsInput,
   Text,
   TextInput,
   Title,
@@ -18,11 +18,11 @@ import { useDisclosure } from '@mantine/hooks';
 import { useForm } from '@mantine/form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { IconPlus } from '@tabler/icons-react';
+import { IconPlus, IconTrash } from '@tabler/icons-react';
 import axios from 'axios';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import type { ApiEnvelope, Project } from '@/lib/types';
+import type { ApiEnvelope, Project, SharedPath } from '@/lib/types';
 
 const PROJECT_TYPES = [
   { value: 'static', label: 'Static' },
@@ -32,6 +32,11 @@ const PROJECT_TYPES = [
   { value: 'wordpress', label: 'WordPress' },
 ];
 
+const SHARED_PATH_TYPES = [
+  { value: 'dir', label: 'Directory' },
+  { value: 'file', label: 'File' },
+];
+
 interface ProjectFormValues {
   name: string;
   base_path: string;
@@ -39,7 +44,7 @@ interface ProjectFormValues {
   docroot_subpath: string;
   keep_releases: number;
   health_check_url: string;
-  shared_paths: string[];
+  shared_paths: SharedPath[];
 }
 
 const INITIAL_VALUES: ProjectFormValues = {
@@ -80,7 +85,9 @@ export function ProjectsPage() {
         docroot_subpath: values.docroot_subpath || undefined,
         keep_releases: values.keep_releases,
         health_check_url: values.health_check_url || undefined,
-        shared_paths: values.shared_paths,
+        shared_paths: values.shared_paths
+          .map((entry) => ({ path: entry.path.trim(), type: entry.type }))
+          .filter((entry) => entry.path.length > 0),
       };
       return (await api.post<ApiEnvelope<Project>>('/projects', payload)).data.data;
     },
@@ -210,12 +217,46 @@ export function ProjectsPage() {
               placeholder="https://example.com/health"
               {...form.getInputProps('health_check_url')}
             />
-            <TagsInput
-              label="Shared paths"
-              description="Press enter to add — e.g. storage, .env"
-              placeholder="storage"
-              {...form.getInputProps('shared_paths')}
-            />
+            <Stack gap="xs">
+              <Text size="sm" fw={500}>
+                Shared paths
+              </Text>
+              <Text size="xs" c="dimmed">
+                Persisted across releases via symlink. <b>Directory</b> is created automatically if
+                missing (e.g. <code>storage</code>); <b>File</b> must already exist under{' '}
+                <code>shared/</code> on the server (e.g. a secret <code>.env</code>).
+              </Text>
+              {form.values.shared_paths.map((_, index) => (
+                <Group key={index} gap="xs" align="flex-start">
+                  <TextInput
+                    placeholder="storage or .env"
+                    style={{ flex: 1 }}
+                    {...form.getInputProps(`shared_paths.${index}.path`)}
+                  />
+                  <Select
+                    data={SHARED_PATH_TYPES}
+                    w={130}
+                    {...form.getInputProps(`shared_paths.${index}.type`)}
+                  />
+                  <ActionIcon
+                    color="red"
+                    variant="subtle"
+                    onClick={() => form.removeListItem('shared_paths', index)}
+                    aria-label="Remove shared path"
+                  >
+                    <IconTrash size={16} />
+                  </ActionIcon>
+                </Group>
+              ))}
+              <Button
+                variant="subtle"
+                size="xs"
+                leftSection={<IconPlus size={14} />}
+                onClick={() => form.insertListItem('shared_paths', { path: '', type: 'dir' })}
+              >
+                Add shared path
+              </Button>
+            </Stack>
             <Group justify="flex-end" mt="md">
               <Button variant="default" onClick={closeModal}>
                 Cancel

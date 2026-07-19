@@ -229,7 +229,7 @@ Each step is written to `Deployment.steps[]` (name, status, duration, output/tai
 5. Verify Hash          Compute sha256 server-side == sha256 sent by CI. Mismatch → abort + unlock
 6. Prepare Release Dir  Create releases/<id>/
 7. Extract              ZipArchive::extractTo() into the release dir. Guard against Zip-Slip. Check inode/size cap
-8. Link Shared          symlink .env, storage/… from shared/ into the release. Create the shared folder if missing
+8. Link Shared          symlink .env, storage/… from shared/ into the release. Seed shared/ from the artifact if it shipped the path; else create a `dir`, but for a `file` entry (e.g. .env) fail loudly rather than create an empty one
 9. Validate             Check the required structure (e.g. public/index.php, index.html… exist)
 10. Pre-activate Hooks  (Laravel) migrate, config:cache… → enqueue to cron-worker (§9). static/WP/PHP: skip
 11. Activate Release    atomic symlink swap: create current.tmp -> releases/<id> then rename → current
@@ -455,7 +455,10 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
   "docroot_subpath": "public",       // current/public
   "php_binary": "/opt/cpanel/ea-php82/root/usr/bin/php",
   "keep_releases": 5,
-  "shared_paths": [".env", "storage"],
+  "shared_paths": [                        // each entry: {path, type}; type = "file" | "dir"
+    { "path": ".env", "type": "file" },    // "file" → must be created in shared/ first (never auto-created empty)
+    { "path": "storage", "type": "dir" }   // "dir"  → auto-created if missing
+  ],                                        // bare strings (e.g. ".env") still accepted → normalized to type "dir"
   "health_check_url": "https://learn.domain/up",
   "hooks": {
     "pre_activate":  ["artisan migrate --force", "artisan config:cache"],
