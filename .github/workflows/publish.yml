@@ -1,0 +1,92 @@
+name: Publish packages
+
+# Publish the public npm packages that the GitHub Action and external CI depend on:
+#   @cporter/sdk  →  shared API client (published first — the CLI depends on it)
+#   @cporter/cli  →  `npx @cporter/cli deploy …`, what packages/github-action runs
+#
+# Prerequisites (one-time):
+#   - Add repo secret NPM_TOKEN: an npm Automation token with publish rights to the
+#     @cporter scope (npmjs.com → Access Tokens → Generate → Automation).
+#
+# Bump the "version" in each package.json before releasing. Runs are idempotent:
+# a version already on npm is skipped, so re-running is safe.
+
+on:
+  # Tag the repo (e.g. `git tag pkg-v0.1.0 && git push --tags`) to release.
+  push:
+    tags:
+      - 'pkg-v*'
+  # Or run manually from the Actions tab; enable dry_run to pack without publishing.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build and pack only — do not publish to npm'
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-packages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for npm provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: |
+          pnpm --filter @cporter/sdk build
+          pnpm --filter @cporter/cli build
+
+      # Publish SDK first: the CLI's `workspace:*` dependency is rewritten by
+      # `pnpm publish` to a real semver range, which must resolve on npm at install time.
+      - name: Publish @cporter/sdk
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/sdk/package.json').version")"
+          if npm view "@cporter/sdk@${version}" version >/dev/null 2>&1; then
+            echo "@cporter/sdk@${version} already on npm — skipping."
+          elif [ "$DRY_RUN" = "true" ]; then
+            echo "[dry-run] would publish @cporter/sdk@${version}"
+            pnpm --filter @cporter/sdk pack
+          else
+            pnpm --filter @cporter/sdk publish --no-git-checks --access public
+          fi
+
+      - name: Publish @cporter/cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/cli/package.json').version")"
+          if npm view "@cporter/cli@${version}" version >/dev/null 2>&1; then
+            echo "@cporter/cli@${version} already on npm — skipping."
+          elif [ "$DRY_RUN" = "true" ]; then
+            echo "[dry-run] would publish @cporter/cli@${version}"
+            pnpm --filter @cporter/cli pack
+          else
+            pnpm --filter @cporter/cli publish --no-git-checks --access public
+          fi

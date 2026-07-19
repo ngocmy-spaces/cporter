@@ -4,6 +4,14 @@
   "description": "Official TypeScript SDK for the cPorter deploy API — the shared core behind the CLI, GitHub Action, and MCP server.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ngocmy-spaces/cporter.git",
+    "directory": "packages/sdk"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

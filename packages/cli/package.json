@@ -4,6 +4,14 @@
   "description": "Command-line client for cPorter — deploy artifacts, poll status, and roll back from any CI or shell.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ngocmy-spaces/cporter.git",
+    "directory": "packages/cli"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "cporter": "./dist/bin.js"
   },
