@@ -122,6 +122,10 @@ Confirm the domain's Document Root is `cporter.domain/current/public` (step 1). 
 
 ## 4. Cron (required — runs Laravel hooks, queue, housekeeping)
 
+Only **one** cron entry is needed. Pick the option matching your host's minimum cron cadence.
+
+### Option A — host allows a 1-minute cron (preferred)
+
 *cPanel ▸ Cron Jobs* → add, every minute:
 
 ```
@@ -129,7 +133,24 @@ Confirm the domain's Document Root is `cporter.domain/current/public` (step 1). 
 ```
 
 This fans out to `cporter:run-jobs` (finalize Laravel deploys), `queue:work` (artifact
-extraction), and `cporter:housekeep`.
+extraction), and `cporter:housekeep`. Laravel deploys finalize within ~1 minute.
+
+### Option B — host caps cron at 5 minutes (common on cPanel)
+
+A `schedule:run` that only fires every 5 minutes makes the `everyMinute` tasks effectively
+5-minutely too, so a Laravel deploy could wait up to ~5 min to finalize. Instead, call the
+internal-loop worker directly — it loops **in-process** for ~4.5 min per tick, finalizing
+deploys, draining the queue, and housekeeping every ~12s, then exits before the next tick:
+
+```
+*/5 * * * * cd /home/USER/cporter.domain/current && /opt/cpanel/ea-php83/root/usr/bin/php artisan cporter:work >> /dev/null 2>&1
+```
+
+Use **either** Option A **or** Option B — not both. With `cporter:work` you do *not* also add
+the `schedule:run` cron. Effective finalize latency drops back to ~seconds despite the 5-minute
+cron limit. Tunables: `--duration` (loop length, keep `< 300` for a `*/5` cron), `--sleep`
+(gap between passes), `--max` (deploys per pass). An atomic cache lock prevents overlapping
+workers.
 
 ---
 

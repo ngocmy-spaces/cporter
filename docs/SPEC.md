@@ -336,7 +336,9 @@ Web request (deploy Laravel)                 Standing cron (every ~1 minute)
   is run by the shell, the runner can use the shell to execute the target app's commands **even when PHP `exec` is blocked** —
   the safest approach: **each job is a shell command line that the runner writes out and lets the next cron run**, or
   the runner tries `proc_open` (CLI PHP is usually less restricted than FPM — probe CLI context separately).
-- **Latency:** hooks run within ≤ one cron cycle (recommend 1 minute; you can have 1 cron/minute running continuously).
+- **Latency:** hooks run within ≤ one cron cycle. Where the host allows a **1-minute** cron, run `schedule:run`
+  every minute. Where cPanel **caps cron at 5 minutes** (common), run `cporter:work` instead — it loops in-process
+  for one cron cycle (finalize + queue + housekeep every ~12s) so latency stays ~seconds rather than ~5 minutes (§10).
   For apps **with no hooks** (static/WP/PHP) → deploy is **instant, synchronous**, never touching cron.
 
 ### 9.2 The drivers (in priority order on this host)
@@ -361,10 +363,21 @@ cPorter runs a probe and stores it in Settings, displaying it in the Admin panel
 
 ## 10. Scheduler / Cron
 
-- **One** cPanel cron job (e.g. every minute) calls `GET/POST https://cporter.domain/cron/tick` (internal token).
-- `cron/tick` handles: running `queue:work --stop-when-empty` (if using the DB queue), pruning expired releases,
-  timing out stuck deployments (cleaning up stale locks), retrying health checks on schedule, running scheduled tasks.
-- The cron can be created automatically via the **cPanel UAPI** at setup (if available), or via manual instructions.
+*As built:* **one** cPanel cron drives everything in shell context (no `/cron/tick` HTTP endpoint — see §20.D).
+Which cron line depends on the host's minimum cadence — use **one** of:
+
+- **A — host allows a 1-minute cron:** `* * * * * … php artisan schedule:run`. The scheduler
+  (`routes/console.php`) fans out to `cporter:run-jobs` (finalize Laravel deploys), `queue:work --stop-when-empty`
+  (artifact extraction), and `cporter:housekeep` (time out stuck deploys, release stale locks).
+- **B — host caps cron at 5 minutes (common on cPanel):** `[every 5 min] … php artisan cporter:work`. Because a
+  5-minutely `schedule:run` would make the `everyMinute` tasks 5-minutely too, `cporter:work` instead loops
+  **in-process** for one cron cycle — each pass runs `run-jobs` + `queue:work` and periodically `housekeep`,
+  sleeping `--sleep` (default 12s) between passes and exiting before the next tick (`--duration` default 280s < 300s).
+  An atomic cache lock prevents overlapping workers. Effective finalize latency: ~seconds, not ~5 minutes.
+
+Use A **or** B, not both — with B you do not also add the `schedule:run` cron. The cron is created manually
+(cPanel ▸ Cron Jobs); auto-creation via cPanel UAPI at setup is a possible future enhancement. Full crontab
+lines: [docs/DEPLOYMENT-CPANEL.md §4](DEPLOYMENT-CPANEL.md).
 
 ---
 
@@ -586,7 +599,7 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 |---|---|---|
 | D | No shell-jobs table | Hooks for Laravel run **inline via `proc_open`** inside the cron `run-jobs` finalize step, not as individually enqueued shell-command jobs. Simpler; works because CLI/cron PHP allows `proc_open`. |
 | D | Driver matrix collapsed | Only `ProcessCommandRunner` (proc_open) is wired. `manual` = "shell unavailable" message. `command_driver` config is **informational only**; **no SSH driver**. |
-| D | No `/cron/tick` HTTP endpoint (§10) | One cPanel cron runs `php artisan schedule:run` (shell context), which drives `cporter:run-jobs` + `queue:work` + `cporter:housekeep`. The `cron_token` config is currently **unused**. (Arguably better — shell context isn't blocked by `disable_functions`.) |
+| D | No `/cron/tick` HTTP endpoint (§10) | One cPanel cron runs `php artisan schedule:run` (shell context), which drives `cporter:run-jobs` + `queue:work` + `cporter:housekeep`. Hosts capped at a 5-minute cron cadence instead run `cporter:work`, an in-process loop wrapping the same three commands to keep latency low (§10.B). The `cron_token` config is currently **unused**. (Arguably better — shell context isn't blocked by `disable_functions`.) |
 
 ### 20.5 Domain model (§5)
 | Kind | Item | Reality |
