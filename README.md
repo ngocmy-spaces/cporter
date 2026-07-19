@@ -1,4 +1,10 @@
-# cPorter
+<p align="center">
+  <img src="apps/web/public/favicon.svg" alt="cPorter logo" width="88" height="88" />
+</p>
+
+<h1 align="center">cPorter</h1>
+
+<p align="center"><em>Atomic, zero-downtime deploys to cPanel — driven by any CI, no root required.</em></p>
 
 Self-hosted deploy orchestrator that runs on **cPanel shared hosting**. Installed like a regular web app
 (monorepo **React + Laravel**, 1 folder / 1 domain), but manages and deploys atomically (release + symlink,
