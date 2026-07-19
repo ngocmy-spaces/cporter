@@ -7,6 +7,7 @@ import {
   Button,
   Card,
   Code,
+  Drawer,
   Group,
   Loader,
   Paper,
@@ -17,10 +18,11 @@ import {
   Text,
   Title,
 } from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconExternalLink, IconRefresh, IconX } from '@tabler/icons-react';
+import { IconCheck, IconExternalLink, IconFolders, IconRefresh, IconX } from '@tabler/icons-react';
 import axios from 'axios';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -32,6 +34,7 @@ import type { ApiEnvelope, Deployment, Project, Release } from '@/lib/types';
 export function ProjectDetailPage() {
   const { slug } = useParams<{ slug: string }>();
   const [selectedDeployment, setSelectedDeployment] = useState<number | null>(null);
+  const [sharedOpened, { open: openShared, close: closeShared }] = useDisclosure(false);
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -174,22 +177,29 @@ export function ProjectDetailPage() {
         </Group>
       </Group>
 
-      <SimpleGrid cols={{ base: 1, md: 2 }}>
-        <Card withBorder radius="md" p="md">
-          <Text fw={600} mb="sm">
-            Overview
-          </Text>
-          <Stack gap="xs">
+      <Card withBorder radius="md" p="md">
+        <Group justify="space-between" mb="sm">
+          <Text fw={600}>Overview</Text>
+          <Button
+            variant="light"
+            size="xs"
+            leftSection={<IconFolders size={14} />}
+            onClick={openShared}
+          >
+            Shared paths{p.shared_paths?.length ? ` (${p.shared_paths.length})` : ''}
+          </Button>
+        </Group>
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" verticalSpacing="sm">
             <Info label="Live release">
               {activeRelease ? (
-                <Group gap="xs" wrap="nowrap">
+                <>
                   <Text size="sm" fw={500}>
                     {activeRelease.version}
                   </Text>
                   <Text size="xs" c="dimmed">
                     {formatRelativeTime(activeRelease.activated_at)}
                   </Text>
-                </Group>
+                </>
               ) : (
                 <Text size="sm" c="dimmed">
                   None active
@@ -198,12 +208,12 @@ export function ProjectDetailPage() {
             </Info>
             <Info label="Last deploy">
               {lastDeployment ? (
-                <Group gap="xs" wrap="nowrap">
+                <>
                   <DeploymentStatusBadge status={lastDeployment.status} />
                   <Text size="xs" c="dimmed">
                     {formatRelativeTime(lastDeployment.created_at)}
                   </Text>
-                </Group>
+                </>
               ) : (
                 <Text size="sm" c="dimmed">
                   —
@@ -228,22 +238,20 @@ export function ProjectDetailPage() {
               <Text size="sm">{formatBytes(p.releases_disk_usage)}</Text>
             </Info>
             <Info label="Disk stats">
-              <Group gap="xs" wrap="nowrap">
-                <Button
-                  size="compact-xs"
-                  variant="light"
-                  leftSection={<IconRefresh size={14} />}
-                  loading={diskBusy}
-                  onClick={() => recomputeDisk.mutate()}
-                >
-                  {diskBusy ? 'Recalculating…' : 'Recalculate'}
-                </Button>
-                <Text size="xs" c="dimmed">
-                  {p.disk_usage_calculated_at
-                    ? `updated ${formatRelativeTime(p.disk_usage_calculated_at)}`
-                    : 'not calculated yet'}
-                </Text>
-              </Group>
+              <Button
+                size="compact-xs"
+                variant="light"
+                leftSection={<IconRefresh size={14} />}
+                loading={diskBusy}
+                onClick={() => recomputeDisk.mutate()}
+              >
+                {diskBusy ? 'Recalculating…' : 'Recalculate'}
+              </Button>
+              <Text size="xs" c="dimmed">
+                {p.disk_usage_calculated_at
+                  ? `updated ${formatRelativeTime(p.disk_usage_calculated_at)}`
+                  : 'not calculated yet'}
+              </Text>
             </Info>
             <Info label="PHP binary">
               <Text size="sm">{p.php_binary || '—'}</Text>
@@ -251,31 +259,8 @@ export function ProjectDetailPage() {
             <Info label="Created">
               <Text size="sm">{formatDateTime(p.created_at)}</Text>
             </Info>
-          </Stack>
-        </Card>
-
-        <Card withBorder radius="md" p="md">
-          <Text fw={600} mb="sm">
-            Shared paths
-          </Text>
-          {p.shared_paths && p.shared_paths.length > 0 ? (
-            <Stack gap="xs">
-              {p.shared_paths.map((sp, index) => (
-                <Group key={`${sp.path}-${index}`} justify="space-between" wrap="nowrap">
-                  <Code>{sp.path}</Code>
-                  <Badge color={sp.type === 'dir' ? 'blue' : 'grape'} variant="light">
-                    {sp.type}
-                  </Badge>
-                </Group>
-              ))}
-            </Stack>
-          ) : (
-            <Text c="dimmed" size="sm">
-              No shared paths configured.
-            </Text>
-          )}
-        </Card>
-      </SimpleGrid>
+        </SimpleGrid>
+      </Card>
 
       <Tabs defaultValue="deployments">
         <Tabs.List>
@@ -405,17 +390,37 @@ export function ProjectDetailPage() {
       </Tabs>
 
       <DeploymentDrawer deploymentId={selectedDeployment} onClose={() => setSelectedDeployment(null)} />
+
+      <Drawer opened={sharedOpened} onClose={closeShared} position="right" size="md" title="Shared paths">
+        {p.shared_paths && p.shared_paths.length > 0 ? (
+          <Stack gap="xs">
+            {p.shared_paths.map((sp, index) => (
+              <Group key={`${sp.path}-${index}`} justify="space-between" wrap="nowrap">
+                <Code>{sp.path}</Code>
+                <Badge color={sp.type === 'dir' ? 'blue' : 'grape'} variant="light">
+                  {sp.type}
+                </Badge>
+              </Group>
+            ))}
+          </Stack>
+        ) : (
+          <Text c="dimmed" size="sm">
+            No shared paths configured.
+          </Text>
+        )}
+      </Drawer>
     </Stack>
   );
 }
 
+/** A labelled overview cell: uppercase label on top, value (and any relative-time hint) stacked below. */
 function Info({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <Group justify="space-between" gap="xs" wrap="nowrap">
+    <Stack gap={2} align="flex-start">
       <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
         {label}
       </Text>
       {children}
-    </Group>
+    </Stack>
   );
 }
