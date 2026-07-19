@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { IconShieldLock } from '@tabler/icons-react';
 import { CodeBlock } from '@/components/docs/CodeBlock';
 
-const WORKFLOW_STEP = `- uses: cporter/deploy-action@v1
+const WORKFLOW_STEP = `- uses: ngocmy-spaces/cporter/packages/github-action@v1
   with:
     host: \${{ secrets.CPORTER_HOST }}
     token: \${{ secrets.CPORTER_TOKEN }}
@@ -24,7 +24,7 @@ jobs:
       - run: npm ci && npm run build
       - name: Package artifact
         run: cd dist && zip -r ../out.zip .
-      - uses: cporter/deploy-action@v1
+      - uses: ngocmy-spaces/cporter/packages/github-action@v1
         with:
           host: \${{ secrets.CPORTER_HOST }}
           token: \${{ secrets.CPORTER_TOKEN }}

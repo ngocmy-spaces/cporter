@@ -14,6 +14,7 @@ import { UsersPage } from '@/pages/UsersPage';
 import { ApiKeysPage } from '@/pages/ApiKeysPage';
 import { DocsLayout } from '@/pages/docs/DocsLayout';
 import { DocsOverviewPage } from '@/pages/docs/DocsOverviewPage';
+import { DocsCpanelSetupPage } from '@/pages/docs/DocsCpanelSetupPage';
 import { DocsQuickstartPage } from '@/pages/docs/DocsQuickstartPage';
 import { DocsGithubActionPage } from '@/pages/docs/DocsGithubActionPage';
 import { DocsMcpPage } from '@/pages/docs/DocsMcpPage';
@@ -49,6 +50,7 @@ export function App() {
       <Route path="/docs" element={<DocsLayout />}>
         <Route index element={<Navigate to="overview" replace />} />
         <Route path="overview" element={<DocsOverviewPage />} />
+        <Route path="cpanel-setup" element={<DocsCpanelSetupPage />} />
         <Route path="quickstart" element={<DocsQuickstartPage />} />
         <Route path="github-action" element={<DocsGithubActionPage />} />
         <Route path="mcp" element={<DocsMcpPage />} />

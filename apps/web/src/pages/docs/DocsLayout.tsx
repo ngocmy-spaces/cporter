@@ -8,6 +8,7 @@ import {
   IconBrandGithub,
   IconInfoCircle,
   IconRobot,
+  IconServer,
   IconTerminal2,
 } from '@tabler/icons-react';
 import { ColorSchemeToggle } from '@/components/ColorSchemeToggle';
@@ -20,6 +21,7 @@ type DocsNavItem = {
 
 const DOCS_NAV: DocsNavItem[] = [
   { to: '/docs/overview', label: 'Overview', icon: IconInfoCircle },
+  { to: '/docs/cpanel-setup', label: 'cPanel setup', icon: IconServer },
   { to: '/docs/quickstart', label: 'Quickstart (CLI)', icon: IconTerminal2 },
   { to: '/docs/github-action', label: 'GitHub Action', icon: IconBrandGithub },
   { to: '/docs/mcp', label: 'AI agent (MCP)', icon: IconRobot },

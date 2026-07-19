@@ -1,4 +1,4 @@
-import { Card, Group, SimpleGrid, Stack, Text, ThemeIcon, Timeline, Title } from '@mantine/core';
+import { Anchor, Card, Group, SimpleGrid, Stack, Text, ThemeIcon, Timeline, Title } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import {
   IconApi,
@@ -53,6 +53,14 @@ export function DocsOverviewPage() {
         for your other domains and applications. You upload a built artifact (a <code>.zip</code>{' '}
         file), cPorter verifies its SHA-256 checksum, creates a release, and activates it — with
         instant rollback to any previous release if something goes wrong.
+      </Text>
+
+      <Text size="sm" c="dimmed">
+        Setting up cPorter for the first time? See{' '}
+        <Anchor component={Link} to="/docs/cpanel-setup">
+          cPanel setup
+        </Anchor>{' '}
+        to install it on your account. Already running it? Pick an integration below.
       </Text>
 
       <Card withBorder radius="md" p="lg">
