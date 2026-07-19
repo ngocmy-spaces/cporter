@@ -186,6 +186,18 @@ export interface PreflightReport {
   checks: PreflightCheck[];
 }
 
+/** Cron liveness from the heartbeat store (docs/SPEC.md §10). */
+export interface CronStatus {
+  /** healthy = cron is beating; down = last beat is stale; unknown = never ran. */
+  state: 'healthy' | 'down' | 'unknown';
+  /** A = 1-min schedule:run; B = 5-min cporter:work loop; null = never seen. */
+  mode: 'A' | 'B' | null;
+  age_seconds: number | null;
+  last_run_at: string | null;
+  host: string | null;
+  passes: number | null;
+}
+
 /** Envelope every cPorter API response is wrapped in. */
 export interface ApiEnvelope<T> {
   data: T;
