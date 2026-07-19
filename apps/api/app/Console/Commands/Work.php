@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Domain\System\CronHeartbeat;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Throwable;
@@ -30,7 +31,7 @@ class Work extends Command
 
     protected $description = 'Loop the cron-worker in-process to beat cPanel 5-minute cron cadence';
 
-    public function handle(): int
+    public function handle(CronHeartbeat $heartbeat): int
     {
         $duration = max(0, (int) $this->option('duration'));
         $sleep = max(1, (int) $this->option('sleep'));
@@ -54,7 +55,11 @@ class Work extends Command
             do {
                 $passes++;
 
-                $this->tick('cporter:run-jobs', ['--max' => $max]);
+                // Mode-B heartbeat for the cron dead-man's switch (docs/SPEC.md §10).
+                $heartbeat->beat(CronHeartbeat::WORKER_KEY, ['passes' => $passes]);
+
+                // --no-heartbeat: this nested run-jobs must not masquerade as a Mode-A tick.
+                $this->tick('cporter:run-jobs', ['--max' => $max, '--no-heartbeat' => true]);
 
                 // Drain staging jobs (artifact extract etc.). --stop-when-empty returns as soon
                 // as the queue is empty; --max-time bounds it so it never eats the whole pass.
