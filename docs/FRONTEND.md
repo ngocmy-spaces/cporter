@@ -19,7 +19,8 @@ apps/web/
 │   ├── components/
 │   │   ├── Layout.tsx            # AppShell (header + navbar)
 │   │   ├── ColorSchemeToggle.tsx # dark/light toggle
-│   │   ├── DeploymentDrawer.tsx  # step timeline + poll to terminal status
+│   │   ├── DeploymentDrawer.tsx  # step timeline (success/failed/warning) + poll to terminal status
+│   │   ├── ProjectEnvPanel.tsx   # admin-only Environment tab: encrypted env-var editor + .env import/adopt
 │   │   ├── StatusBadge.tsx
 │   │   ├── Placeholder.tsx
 │   │   └── docs/CodeBlock.tsx     # used by the /docs pages
@@ -30,6 +31,7 @@ apps/web/
 │       ├── api.ts            # axios client, base /api/v1, bearer token
 │       ├── auth.tsx          # session auth context (login/logout/user)
 │       ├── format.ts         # formatting helpers
+│       ├── parseEnvText.ts   # parse pasted/uploaded .env text → {key,value}[] (comments/quotes-aware)
 │       ├── types.ts          # shared FE types
 │       └── queryClient.ts
 ```

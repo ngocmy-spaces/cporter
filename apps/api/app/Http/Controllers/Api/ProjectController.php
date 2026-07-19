@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Audit\AuditLogger;
+use App\Domain\Deploy\EnvFileRenderer;
 use App\Domain\Storage\PathJail;
 use App\Enums\ProjectStatus;
 use App\Enums\ProjectType;
@@ -130,7 +131,7 @@ class ProjectController extends Controller
 
     /**
      * Duplicate an existing project's configuration into a new project (docs/SPEC.md §5). Copies
-     * type/docroot/php_binary/keep_releases/health_check_url/shared_paths/hooks; the caller supplies
+     * type/docroot/php_binary/keep_releases/health_check_url/shared_paths/hooks/env_vars; the caller supplies
      * a new name + base_path (+ optional slug). No releases/deployments/artifacts are copied — the
      * clone is a fresh project that starts `active` with no live release until its first deploy.
      * `shared_paths` of type `file` are copied as config; their contents are NOT — preflight will
@@ -155,6 +156,7 @@ class ProjectController extends Controller
             'health_check_url' => $project->health_check_url,
             'shared_paths' => $project->shared_paths,
             'hooks' => $project->hooks,
+            'env_vars' => $project->env_vars,
             'status' => ProjectStatus::Active,
         ];
 
@@ -228,10 +230,31 @@ class ProjectController extends Controller
     {
         $report = $storage->preflight($project->base_path, $project->shared_paths ?? []);
 
+        // When cPorter manages env vars but shared/.env was hand-created, deploys skip writing it —
+        // surface that conflict here rather than mid-deploy (docs/SPEC.md §9).
+        if (($project->env_vars ?? []) !== []) {
+            $state = $storage->sharedFileState($this->sharedDir($project), '.env', EnvFileRenderer::MARKER);
+            if ($state['exists'] && ! $state['managed']) {
+                $report['checks'][] = [
+                    'key' => 'env_file',
+                    'label' => 'Managed .env',
+                    'status' => 'warning',
+                    'detail' => 'shared/.env exists but is not managed by cPorter — env vars will be skipped on deploy '
+                        .'until you take it over from the Environment tab.',
+                ];
+            }
+        }
+
         // Document Root is a cPanel vhost concern cPorter can't configure — always a manual reminder.
         $report['checks'][] = $this->docrootCheck($project);
 
         return $report;
+    }
+
+    /** shared/ dir for a project — mirrors DeployEngine's convention (base_path + '/shared'). */
+    private function sharedDir(Project $project): string
+    {
+        return rtrim($project->base_path, '/').'/shared';
     }
 
     /**
@@ -306,6 +329,105 @@ class ProjectController extends Controller
         ]);
 
         return response()->json(['data' => $project->fresh()]);
+    }
+
+    /**
+     * Read a project's managed environment variables (docs/SPEC.md §9). Admin-only — returns the
+     * DECRYPTED values, so this must never be exposed to viewers or bundled into show()/index().
+     * Also reports the on-disk shared/.env state so the UI can show the take-over warning/action.
+     */
+    public function env(Project $project, StorageAdapter $storage): JsonResponse
+    {
+        return response()->json(['data' => $this->envPayload($project, $storage)]);
+    }
+
+    /**
+     * Replace a project's managed env vars (docs/SPEC.md §9). Values are stored encrypted at rest
+     * (see Project::envVars). Keys must be POSIX-shell-safe and unique; blank-key rows are dropped
+     * by the model. On the next deploy cPorter renders these into shared/.env.
+     */
+    public function updateEnv(Request $request, Project $project, StorageAdapter $storage): JsonResponse
+    {
+        $data = $request->validate([
+            'env_vars' => ['present', 'array'],
+            'env_vars.*' => ['array'],
+            'env_vars.*.key' => ['required', 'string', 'max:255', 'regex:/^[A-Za-z_][A-Za-z0-9_]*$/'],
+            'env_vars.*.value' => ['nullable', 'string', 'max:32768'],
+        ], [
+            'env_vars.*.key.regex' => 'Each key must start with a letter or underscore and contain only letters, digits, and underscores.',
+        ]);
+
+        $this->assertUniqueEnvKeys($data['env_vars']);
+
+        $project->env_vars = $data['env_vars'];
+        $project->save();
+
+        // Audit key NAMES + count only — never the secret values.
+        app(AuditLogger::class)->record('project.env_updated', $project, [
+            'slug' => $project->slug,
+            'keys' => array_map(fn (array $v): string => $v['key'], $project->env_vars),
+            'count' => count($project->env_vars),
+        ]);
+
+        return response()->json(['data' => $this->envPayload($project, $storage)]);
+    }
+
+    /**
+     * Force-write shared/.env from the current env vars, taking over a hand-created (unmanaged)
+     * file (docs/SPEC.md §9). Establishes cPorter ownership (stamps the managed marker) so future
+     * deploys overwrite normally; it does NOT itself redeploy — the running release picks the file
+     * up on the next deploy, which the returned `message` tells the operator.
+     */
+    public function adoptEnvFile(Project $project, StorageAdapter $storage): JsonResponse
+    {
+        $storage->writeSharedFile(
+            $this->sharedDir($project),
+            '.env',
+            EnvFileRenderer::render($project->env_vars ?? []),
+            EnvFileRenderer::MARKER,
+            force: true,
+        );
+
+        app(AuditLogger::class)->record('project.env_adopted', $project, ['slug' => $project->slug]);
+
+        return response()->json([
+            'data' => $this->envPayload($project, $storage),
+            'message' => 'shared/.env is now managed by cPorter. Trigger a deploy to apply it to the live release.',
+        ]);
+    }
+
+    /**
+     * @return array{vars: list<array{key: string, value: string}>, file: array{exists: bool, managed: bool}}
+     */
+    private function envPayload(Project $project, StorageAdapter $storage): array
+    {
+        return [
+            'vars' => $project->fresh()->env_vars,
+            'file' => $storage->sharedFileState($this->sharedDir($project), '.env', EnvFileRenderer::MARKER),
+        ];
+    }
+
+    /**
+     * The model de-dupes silently (last wins), but for the editor we surface a duplicate as a
+     * field error so the operator notices rather than losing a row.
+     *
+     * @param  array<int, mixed>  $envVars
+     */
+    private function assertUniqueEnvKeys(array $envVars): void
+    {
+        $seen = [];
+        foreach ($envVars as $i => $var) {
+            $key = is_array($var) ? trim((string) ($var['key'] ?? '')) : '';
+            if ($key === '') {
+                continue;
+            }
+            if (isset($seen[$key])) {
+                throw ValidationException::withMessages([
+                    "env_vars.{$i}.key" => "Duplicate key \"{$key}\".",
+                ]);
+            }
+            $seen[$key] = true;
+        }
     }
 
     /**

@@ -130,6 +130,54 @@ it('polls deployment status via GET', function () {
         ->assertJsonPath('data.status', 'success');
 });
 
+it('renders managed env vars into shared/.env and symlinks it into the release', function () {
+    $this->project->update(['env_vars' => [['key' => 'APP_ENV', 'value' => 'production']]]);
+
+    $zip = buildZip(['index.html' => 'hi']);
+    $res = $this->withToken($this->token)->post('/api/v1/projects/demo/deployments', [
+        'artifact' => upload($zip),
+        'sha256' => hash_file('sha256', $zip),
+    ])->assertStatus(202);
+
+    $res->assertJsonPath('data.status', 'success');
+
+    $steps = collect($res->json('data.steps'));
+    expect($steps->firstWhere('name', 'write_env')['status'])->toBe('success')
+        ->and(file_get_contents($this->base.'/shared/.env'))->toContain('APP_ENV="production"')
+        ->and(is_link($this->base.'/current/.env'))->toBeTrue()
+        ->and(file_get_contents($this->base.'/current/.env'))->toContain('APP_ENV="production"');
+});
+
+it('warns and skips writing when shared/.env is unmanaged, without failing the deploy', function () {
+    File::makeDirectory($this->base.'/shared', 0777, true, true);
+    File::put($this->base.'/shared/.env', "APP_ENV=hand-made\n");
+    $this->project->update(['env_vars' => [['key' => 'APP_ENV', 'value' => 'from-cporter']]]);
+
+    $zip = buildZip(['index.html' => 'hi']);
+    $res = $this->withToken($this->token)->post('/api/v1/projects/demo/deployments', [
+        'artifact' => upload($zip),
+        'sha256' => hash_file('sha256', $zip),
+    ])->assertStatus(202);
+
+    $res->assertJsonPath('data.status', 'success'); // deploy still succeeds
+
+    $writeEnv = collect($res->json('data.steps'))->firstWhere('name', 'write_env');
+    expect($writeEnv['status'])->toBe('warning')
+        ->and($writeEnv['note'])->toContain('not managed by cPorter')
+        ->and(file_get_contents($this->base.'/shared/.env'))->toBe("APP_ENV=hand-made\n"); // untouched
+});
+
+it('does not touch shared/.env when no env vars are configured', function () {
+    $zip = buildZip(['index.html' => 'hi']);
+    $res = $this->withToken($this->token)->post('/api/v1/projects/demo/deployments', [
+        'artifact' => upload($zip),
+        'sha256' => hash_file('sha256', $zip),
+    ])->assertStatus(202);
+
+    expect(collect($res->json('data.steps'))->firstWhere('name', 'write_env'))->toBeNull()
+        ->and(file_exists($this->base.'/shared/.env'))->toBeFalse();
+});
+
 it('fails the deploy when the project is already locked', function () {
     File::put($this->base.'/deploy.lock', 'held-by-another'); // fresh lock held by someone else
     $zip = buildZip(['index.html' => 'x']);

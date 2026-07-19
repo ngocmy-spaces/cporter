@@ -111,9 +111,12 @@ Used only by the SPA. **Not reachable with an API key** (session guard). Listed 
 | GET | `/projects` · `/projects/{slug}` | read | list / show projects. `?search=` + `?status=active\|disabled\|deleting` filter; `?page=`/`?per_page=` (≤100) switch to a paginated `{data, meta}` envelope, else the full list. **Show** also embeds `active_release` (`{id,version,activated_at}`) and `last_deployment` (`{id,status,created_at}`) summaries (or `null`) so the detail page can lazy-load the per-tab lists |
 | POST | `/projects` | admin | create a project (jail-validated `base_path`, which must not already be used by another project). Also scaffolds `releases/` + `shared/` and returns a `preflight` report alongside `data` (see below) |
 | POST | `/projects/{slug}/preflight` | admin | (re-)run host preflight: idempotently ensure `releases/` + `shared/`, probe symlink support, inspect `current`, flag missing shared files + the manual Document-Root step → `{ data: <report> }` |
-| POST | `/projects/{slug}/clone` | admin | duplicate the project's config into a new project. Body: `name`, `base_path` (required, jail-validated + unique), `slug?`. Copies type/docroot/php_binary/keep_releases/health_check_url/shared_paths/hooks; **no** releases/deployments are copied; the clone starts `active`. Same `{ data, preflight }` + `201` as create |
+| POST | `/projects/{slug}/clone` | admin | duplicate the project's config into a new project. Body: `name`, `base_path` (required, jail-validated + unique), `slug?`. Copies type/docroot/php_binary/keep_releases/health_check_url/shared_paths/hooks/env_vars; **no** releases/deployments are copied; the clone starts `active`. Same `{ data, preflight }` + `201` as create |
 | PATCH | `/projects/{slug}` | admin | update project config; `status: disabled` blocks new deploys. `slug`/`base_path`/`type` are frozen once releases exist |
 | DELETE | `/projects/{slug}` | admin | soft-delete a project. Body `purge`: `none` (default — hide only, files kept, `200`) · `releases` (drop releases/ + `current`, keep shared/) · `all` (delete the whole base_path). A purge runs async: the project goes `deleting` (deploys blocked) and is hidden when done → `202` |
+| GET | `/projects/{slug}/env` | admin | read managed env vars (decrypted) + the `shared/.env` file state → `{ data: { vars, file } }`. **Admin-only** (secrets) — never in `show`/`index` |
+| PUT | `/projects/{slug}/env` | admin | replace the managed env vars. Body `env_vars: [{key,value}]` (keys `^[A-Za-z_][A-Za-z0-9_]*$`, unique, ≤255; value ≤32768). Stored encrypted; rendered to `shared/.env` on the next deploy → `{ data: { vars, file } }` |
+| POST | `/projects/{slug}/env/adopt` | admin | force-write `shared/.env` from the current env vars, taking over a hand-created (unmanaged) file (stamps the managed marker). Does not redeploy → `{ data: { vars, file }, message }` |
 | POST | `/projects/{slug}/disk-usage/recompute` | admin | recompute the on-disk footprint off-request; returns the project and sets `disk_usage_status: running` to poll. Idempotent while a run is in flight (unless >10 min stale) → `202` |
 | GET | `/projects/{slug}/deployments` · `/projects/{slug}/releases` | read | per-project history |
 | GET | `/projects/{slug}/activity` | read | project-scoped audit feed (create/update/preflight/delete…), newest first, `?action=` filter, capped at 200 |
@@ -187,6 +190,32 @@ A command starting with `artisan ` is prefixed with the project's `php_binary` (
 string runs as a raw shell command in the release directory (cwd), 600s timeout, on the cron worker (§SPEC 9).
 The server trims commands and drops blanks/empty stages, so an all-empty `hooks` persists as `{}`.
 
+### Environment variables
+
+Managed env vars are **admin-only** and handled via the dedicated `/projects/{slug}/env` endpoints — they
+are **not** part of `POST /projects` / `PATCH /projects/{slug}` and never appear in `show`/`index` (values
+are secret). Stored **encrypted at rest**; on deploy cPorter renders them into `shared/.env` (§SPEC 6 step
+7b, §SPEC 9).
+
+`GET` / `PUT` / `POST …/adopt` all return the same envelope:
+
+```json
+{ "data": { "vars": [{ "key": "APP_ENV", "value": "production" }], "file": { "exists": true, "managed": true } } }
+```
+
+- `vars` — ordered `{key,value}` list (decrypted). Keys must match `^[A-Za-z_][A-Za-z0-9_]*$`, be unique,
+  ≤255 chars; values ≤32768 chars. `PUT` validates per-row (`422` on `env_vars.{i}.key` / `.value`); the
+  server trims keys and drops blank-key rows.
+- `file` — on-disk state of `shared/.env`: `exists` (present on the server) and `managed` (carries cPorter's
+  marker header). `exists && !managed` means a hand-created file — deploys **skip** writing it (recorded as a
+  non-fatal `warning` step) until taken over.
+- `POST …/adopt` force-writes `shared/.env` from the current vars, stamping the marker so cPorter manages it
+  going forward. It does **not** redeploy — the returned `message` reminds the operator to deploy to apply it
+  to the live release.
+
+**Deployment step:** when env vars are set, a `write_env` step precedes `link_shared` (`success` when
+written, `warning` — with a `note` — when an unmanaged `shared/.env` is left untouched). See §8.
+
 ---
 
 ## 6. Idempotency
@@ -226,6 +255,10 @@ Shape returned by deployment endpoints (see `packages/sdk/src/types.ts` for the 
 **Deployment statuses:** `queued` → `running` → (`hooks_pending` for Laravel) → terminal one of
 `success` | `failed` | `rolled_back`.
 **Terminal statuses:** `success`, `failed`, `rolled_back` (clients poll until one of these).
+
+**Step shape:** each `steps[]` entry is `{ name, status, duration_ms, error?, note? }`. `status` is
+`success` | `failed` | `warning`. A `warning` is non-fatal (the deploy continues) and carries a `note`
+— e.g. `write_env` skipping a hand-created, unmanaged `shared/.env`.
 
 ---
 

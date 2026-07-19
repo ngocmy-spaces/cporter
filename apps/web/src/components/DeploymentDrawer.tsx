@@ -1,12 +1,25 @@
 import { Divider, Drawer, Group, Loader, Stack, Text, Timeline } from '@mantine/core';
-import { IconCheck, IconX } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCheck, IconX } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { api } from '@/lib/api';
 import { formatBytes, formatDateTime } from '@/lib/format';
 import { DeploymentStatusBadge } from '@/components/StatusBadge';
-import type { ApiEnvelope, Deployment, DeploymentStatus } from '@/lib/types';
+import type { ApiEnvelope, Deployment, DeploymentStatus, DeploymentStep } from '@/lib/types';
 
 const TERMINAL_STATUSES = new Set<DeploymentStatus>(['success', 'failed', 'rolled_back']);
+
+const STEP_COLOR: Record<DeploymentStep['status'], string> = {
+  success: 'green',
+  failed: 'red',
+  warning: 'yellow',
+};
+
+const STEP_BULLET: Record<DeploymentStep['status'], ReactNode> = {
+  success: <IconCheck size={12} />,
+  failed: <IconX size={12} />,
+  warning: <IconAlertTriangle size={12} />,
+};
 
 /**
  * Drawer showing one deployment's steps as a Timeline. Polls while the deployment is
@@ -69,8 +82,8 @@ export function DeploymentDrawer({
                 <Timeline.Item
                   key={`${step.name}-${index}`}
                   title={step.name}
-                  color={step.status === 'success' ? 'green' : 'red'}
-                  bullet={step.status === 'success' ? <IconCheck size={12} /> : <IconX size={12} />}
+                  color={STEP_COLOR[step.status] ?? 'red'}
+                  bullet={STEP_BULLET[step.status] ?? <IconX size={12} />}
                 >
                   <Text size="xs" c="dimmed">
                     {step.duration_ms} ms
@@ -78,6 +91,11 @@ export function DeploymentDrawer({
                   {step.error && (
                     <Text size="xs" c="red" mt={4}>
                       {step.error}
+                    </Text>
+                  )}
+                  {step.note && (
+                    <Text size="xs" c="yellow.8" mt={4}>
+                      {step.note}
                     </Text>
                   )}
                 </Timeline.Item>

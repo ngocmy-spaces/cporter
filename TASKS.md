@@ -68,6 +68,7 @@ and **spec reference**. Legend: ✅ done · 🔜 next · ⬜ todo · 🔒 blocke
 | **T3.4** | Audit log UI | ✅ | `AuditLogger` ghi 9 action + `GET /audit-logs`; LogsPage = bảng audit (action/actor/subject/meta/ip/when) + filter action, poll 15s | §12 |
 | **T3.5** | Housekeeping | ✅ | Đã có từ T2.5 (`cporter:housekeep`: fail timeout + nhả lock treo, theo lịch) | §10 |
 | **T3.6** | Webhooks | ✅ | `POST /webhooks/{github\|gitlab}` verify HMAC/token + ghi audit (env `CPORTER_WEBHOOK_SECRET`); cấu hình qua env, không cần UI | §7, §12 |
+| **T3.7** | Env-var management | ✅ | `Project.env_vars` **mã hoá at-rest** (Crypt); admin-only `GET/PUT /projects/{slug}/env` + `POST …/env/adopt`; deploy render `shared/.env` (step `write_env` trước `link_shared`) với marker ownership — file người dùng tự tạo không bị ghi đè (step `warning`, không fail deploy); Environment tab (editor value masked, import từ .env, take-over action). *(Không có trong thiết kế gốc; thêm trong thực tế.)* | §5, §6, §9, §20.1, §20.5 |
 
 ---
 

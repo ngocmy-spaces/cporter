@@ -60,6 +60,10 @@ Route::prefix('v1')->group(function () {
                 Route::post('/projects', [ProjectController::class, 'store']);
                 Route::post('/projects/{project}/preflight', [ProjectController::class, 'preflight']);
                 Route::post('/projects/{project}/clone', [ProjectController::class, 'clone']);
+                // Env vars are admin-only (decrypted secrets) — kept off the viewer-readable reads above.
+                Route::get('/projects/{project}/env', [ProjectController::class, 'env']);
+                Route::put('/projects/{project}/env', [ProjectController::class, 'updateEnv']);
+                Route::post('/projects/{project}/env/adopt', [ProjectController::class, 'adoptEnvFile']);
                 Route::patch('/projects/{project}', [ProjectController::class, 'update']);
                 Route::delete('/projects/{project}', [ProjectController::class, 'destroy']);
                 Route::post('/releases/{release}/activate', [ReleaseController::class, 'activate']);

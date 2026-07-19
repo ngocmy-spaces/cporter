@@ -216,7 +216,7 @@ DB: cPanel's MySQL (or SQLite for a small deployment — **[ASSUMPTION B]** use 
 |---|---|---|
 | **User** | id, name, email, password, role | Admin panel login. |
 | **ApiKey / Token** | id, name, prefix, hash, scopes[], project_id?, last_used_at, expires_at, revoked_at | Token for CI. Stores the **hash** (Sanctum-style), shows plaintext once. Scopes: `deploy`, `read`, `rollback`, `admin`. |
-| **Project** | id, name, slug, base_path, type(`laravel`\|`static`\|`php`\|`node`\|`wordpress`), docroot_subpath, php_binary, keep_releases, health_check_url, hooks(json), shared_paths(json), status(`active`\|`disabled`\|`deleting`), deleted_at, disk_usage, releases_disk_usage, disk_usage_status, disk_usage_calculated_at, shared_disk_usage(json — per-shared-path bytes) | Configuration for one managed domain. Soft-deleted (`deleted_at`); a `disabled` or `deleting` project rejects new deploys. Disk figures are recomputed by the deploy pipeline and the recompute endpoint (symlinks never followed, so shared data is counted once); `shared_disk_usage` breaks the shared total down per entry. |
+| **Project** | id, name, slug, base_path, type(`laravel`\|`static`\|`php`\|`node`\|`wordpress`), docroot_subpath, php_binary, keep_releases, health_check_url, hooks(json), shared_paths(json), env_vars(**encrypted** text — managed env vars), status(`active`\|`disabled`\|`deleting`), deleted_at, disk_usage, releases_disk_usage, disk_usage_status, disk_usage_calculated_at, shared_disk_usage(json — per-shared-path bytes) | Configuration for one managed domain. Soft-deleted (`deleted_at`); a `disabled` or `deleting` project rejects new deploys. Disk figures are recomputed by the deploy pipeline and the recompute endpoint (symlinks never followed, so shared data is counted once); `shared_disk_usage` breaks the shared total down per entry. **`env_vars`** is an ordered list of `{key,value}` stored **encrypted at rest** (Laravel `Crypt`, the app's only reversible-secret store); on deploy cPorter renders it into `shared/.env` (see §6, §9). Never serialized by `show`/`index` — read/written only via the admin-only `/projects/{slug}/env` endpoints (API.md). |
 | **Release** | id, project_id, ref/version, artifact_id, path, state(`pending`\|`extracting`\|`ready`\|`active`\|`superseded`\|`failed`), created_by, activated_at | One physical release. |
 | **Artifact** | id, project_id, filename, size, sha256, storage_path, uploaded_at, status | The build file from CI. |
 | **Deployment** | id, project_id, release_id, trigger(`api`\|`manual`\|`cron`), status(`queued`→`running`→`success`\|`failed`\|`rolled_back`), steps(json), started_at, finished_at, actor | One pipeline run. |
@@ -238,7 +238,8 @@ Each step is written to `Deployment.steps[]` (name, status, duration, output/tai
 5. Verify Hash          Compute sha256 server-side == sha256 sent by CI. Mismatch → abort + unlock
 6. Prepare Release Dir  Create releases/<id>/
 7. Extract              ZipArchive::extractTo() into the release dir. Guard against Zip-Slip. Check inode/size cap
-8. Link Shared          symlink .env, storage/… from shared/ into the release. Seed shared/ from the artifact if it shipped the path; else create a `dir`, but for a `file` entry (e.g. .env) fail loudly rather than create an empty one
+7b. Write Env           If the project has managed env_vars: render them into shared/.env (marker header) BEFORE Link Shared, so the app + hooks (config:cache) see them. Ownership rule: overwrite only cPorter's own marked file; a hand-created shared/.env is left untouched and the step is a non-fatal `warning` (never fails the deploy). See §9
+8. Link Shared          symlink .env, storage/… from shared/ into the release. Seed shared/ from the artifact if it shipped the path; else create a `dir`, but for a `file` entry (e.g. .env) fail loudly rather than create an empty one. When cPorter wrote shared/.env in 7b, `.env` (type file) is auto-ensured in the linked set
 9. Validate             Check the required structure (e.g. public/index.php, index.html… exist)
 10. Pre-activate Hooks  (Laravel) migrate, config:cache… → enqueue to cron-worker (§9). static/WP/PHP: skip
 11. Activate Release    atomic symlink swap: create current.tmp -> releases/<id> then rename → current
@@ -316,6 +317,16 @@ PHP-FPM's `disable_functions`. The cron command line is executed directly by `/b
 |---|---|---|
 | **Web PHP (synchronous)** | filesystem (mkdir/rename/unlink/scandir), `ZipArchive` extract, `symlink`, cURL health check | The entire pipeline for **static / WordPress / plain PHP** apps: extract → link shared → swap symlink → health check → prune. **No shell needed.** |
 | **Cron shell (asynchronous)** | run real shell commands: `php artisan migrate/config:cache/queue:restart`, composer if needed, cPorter's own artisan | **Hooks for the target Laravel app** + queue worker + housekeeping |
+
+**Managed env (`shared/.env`).** A project may have **managed env vars** (SPEC §5, stored encrypted).
+The pipeline renders them into `shared/.env` in the synchronous staging phase (step 7b, before Link
+Shared), so the file is present and symlinked into the release before any hook runs — `php artisan
+config:cache` in a pre/post-activate hook picks it up. The rendered file carries a marker header
+(`# Managed by cPorter …`); cPorter only overwrites its own marked file. A hand-created `shared/.env`
+is **never clobbered** — the write is skipped and recorded as a non-fatal `warning` step. Operators
+take over an unmanaged file from the admin UI (force-write / adopt), which stamps the marker so
+subsequent deploys manage it. When no env vars are configured, `shared/.env` stays the
+operator-managed shared file it has always been.
 
 ### 9.1 Command Runner mechanism (`cron-worker` driver)
 
@@ -586,6 +597,7 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 | D | Chunked-upload paths | Project-nested: `POST/PUT …/projects/{slug}/artifacts/uploads/…`, not the top-level shape sketched in §7. API.md is authoritative. |
 | D | Envelope | Success `{data}`, error `{error}`. `meta` is emitted **only** by paginated `GET /projects` (`{data, meta:{current_page,last_page,per_page,total}}`); elsewhere it is absent. |
 | D | Project management endpoints | Beyond create/read, the admin surface ships `PATCH /projects/{slug}` (partial update; `status` toggles enable/disable; `slug`/`base_path`/`type` frozen once releases exist), `DELETE /projects/{slug}` (soft-delete + optional async disk purge `none`\|`releases`\|`all`), and `POST /projects/{slug}/clone` (duplicate config into a new project — no releases copied). `GET /projects` supports `?search`, `?status`, and opt-in `?page`/`?per_page`. `base_path` is now unique across live projects (enforced on create + clone). Full contract in API.md. |
+| D | Env-var management endpoints | Admin-only `GET`/`PUT /projects/{slug}/env` (read/replace managed env vars; values stored encrypted, never in `show`/`index`) and `POST /projects/{slug}/env/adopt` (force-write `shared/.env` to take over a hand-created file). `GET`/`PUT` return `{vars, file:{exists,managed}}`. Rendered into `shared/.env` on deploy (§6 step 7b, §9). Full contract in API.md. |
 | B | `GET /projects` & `GET /projects/{slug}/releases` | Listed in §7 as CI read-scope, but implemented **admin-session-only** → CI read-scope tokens can't call them. Decide: expose to read-scope keys, or drop from the CI contract. |
 | B | `GET /projects/{slug}/deployments/{id}/logs` | In §7, **not implemented**. Logs are returned inside the deployment `steps[]`; either build the endpoint or remove it from the contract (currently removed from API.md). |
 | B | `202` has no `Location` header | §7/§6 promise `Location`; not set. Poll via the id in the body. |
@@ -617,6 +629,7 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 | D | Persisted fields | `Deployment.idempotency_key` is a real column with a unique `(project_id, idempotency_key)` index; a `settings` key/value table exists (probe/config). `Project` is **soft-deleted** (`deleted_at`) — a delete keeps deploy/audit history; disk reclamation is a separate opt-in (`PurgeProjectJob`). |
 | D | `Release`→`Artifact` | `artifact_id` is **nullable** (effectively `*—1 optional`, not strict `1—1`). |
 | D | `hooks` validation/normalization | `Project.hooks` is structurally validated (only `pre_activate`/`post_activate` stages; each a list of ≤1000-char command strings) and normalized on write (trim, drop blanks/empty stages → `{}`), mirroring `shared_paths`. Previously stored as a shapeless array. |
+| D | `env_vars` (encrypted) | `Project.env_vars` — ordered `{key,value}` list stored **encrypted at rest** (Laravel `Crypt`; the app's first/only reversible-secret store), `$hidden` from serialization, keys validated `^[A-Za-z_][A-Za-z0-9_]*$` + unique. Rendered into `shared/.env` on deploy with a managed-marker ownership guard (§6 step 7b, §9). Not in the original §5 model. |
 
 ### 20.6 Ecosystem / release (§18)
 | Kind | Item | Reality |

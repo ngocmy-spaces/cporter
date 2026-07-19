@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Crypt;
 
 /**
  * A managed project = one cPanel domain folder cPorter deploys to (docs/SPEC.md §5).
@@ -39,7 +40,20 @@ class Project extends Model
         'health_check_url',
         'shared_paths',
         'hooks',
+        'env_vars',
         'status',
+    ];
+
+    /**
+     * Never leak env-var values through the default model serialization (show()/index()), which
+     * viewers can read — secrets are exposed only via the admin-only /projects/{project}/env
+     * endpoint. `$hidden` affects array/JSON output only; `$project->env_vars` still works in PHP
+     * for the deploy engine.
+     *
+     * @var list<string>
+     */
+    protected $hidden = [
+        'env_vars',
     ];
 
     /**
@@ -155,6 +169,54 @@ class Project extends Model
         }
 
         return $out;
+    }
+
+    /**
+     * env_vars is an ordered JSON list of {key, value} pairs cPorter renders into shared/.env on
+     * deploy (docs/SPEC.md §9). Because these are secrets, the value is stored ENCRYPTED at rest
+     * via Laravel's Crypt (APP_KEY) — the column holds ciphertext, not JSON. Keys are trimmed,
+     * blank-key rows dropped, and duplicate keys de-duped (last wins) so a UI/import can send
+     * padded rows without persisting junk. This is the app's only reversible-secret store.
+     */
+    protected function envVars(): Attribute
+    {
+        return Attribute::make(
+            get: fn (?string $value): array => self::normalizeEnvVars(
+                $value !== null && $value !== '' ? json_decode(Crypt::decryptString($value), true) : []
+            ),
+            set: fn ($value): string => Crypt::encryptString(
+                (string) json_encode(self::normalizeEnvVars($value))
+            ),
+        );
+    }
+
+    /**
+     * @param  mixed  $raw
+     * @return list<array{key: string, value: string}>
+     */
+    public static function normalizeEnvVars($raw): array
+    {
+        $out = [];
+
+        foreach (is_array($raw) ? $raw : [] as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $key = trim((string) ($item['key'] ?? ''));
+            if ($key === '') {
+                continue;
+            }
+
+            // De-dupe by key, last value wins; preserve first-seen order.
+            $out[$key] = (string) ($item['value'] ?? '');
+        }
+
+        return array_map(
+            fn (string $key, string $value): array => ['key' => $key, 'value' => $value],
+            array_keys($out),
+            array_values($out),
+        );
     }
 
     public function getRouteKeyName(): string

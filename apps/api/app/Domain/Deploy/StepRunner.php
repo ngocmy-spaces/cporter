@@ -40,13 +40,22 @@ class StepRunner
         $this->push($name, $ok ? 'success' : 'failed', microtime(true), $ok ? null : $error);
     }
 
+    /**
+     * Record a non-fatal warning: the step neither succeeded cleanly nor failed the deploy — e.g.
+     * write_env skipping an unmanaged shared/.env (docs/SPEC.md §9). The pipeline continues.
+     */
+    public function warn(string $name, string $note): void
+    {
+        $this->push($name, 'warning', microtime(true), null, $note);
+    }
+
     /** @return list<array<string, mixed>> */
     public function steps(): array
     {
         return $this->steps;
     }
 
-    private function push(string $name, string $status, float $start, ?string $error = null): void
+    private function push(string $name, string $status, float $start, ?string $error = null, ?string $note = null): void
     {
         $step = [
             'name' => $name,
@@ -55,6 +64,9 @@ class StepRunner
         ];
         if ($error !== null) {
             $step['error'] = $error;
+        }
+        if ($note !== null) {
+            $step['note'] = $note;
         }
 
         $this->steps[] = $step;

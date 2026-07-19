@@ -52,6 +52,7 @@ import axios from 'axios';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { DeploymentDrawer } from '@/components/DeploymentDrawer';
+import { ProjectEnvPanel } from '@/components/ProjectEnvPanel';
 import { DeploymentStatusBadge, ReleaseStateBadge } from '@/components/StatusBadge';
 import { formatBytes, formatDateTime, formatRelativeTime } from '@/lib/format';
 import type {
@@ -114,6 +115,8 @@ const ACTIVITY_ACTION_META: Record<string, { label: string; color: string }> = {
   'project.deleting': { label: 'Deleting…', color: 'orange' },
   'project.deleted': { label: 'Deleted', color: 'red' },
   'project.delete_failed': { label: 'Delete failed', color: 'red' },
+  'project.env_updated': { label: 'Env vars updated', color: 'blue' },
+  'project.env_adopted': { label: '.env taken over', color: 'yellow' },
 };
 
 function getActivityMeta(action: string) {
@@ -802,6 +805,7 @@ export function ProjectDetailPage() {
           <Tabs.Tab value="deployments">Deployments</Tabs.Tab>
           <Tabs.Tab value="releases">Releases</Tabs.Tab>
           <Tabs.Tab value="activity">Activity</Tabs.Tab>
+          {isAdmin && <Tabs.Tab value="env">Environment</Tabs.Tab>}
         </Tabs.List>
 
         <Tabs.Panel value="deployments" pt="md">
@@ -971,6 +975,12 @@ export function ProjectDetailPage() {
             </PanelBody>
           </Paper>
         </Tabs.Panel>
+
+        {isAdmin && (
+          <Tabs.Panel value="env" pt="md">
+            <ProjectEnvPanel slug={slug!} active={activeTab === 'env'} />
+          </Tabs.Panel>
+        )}
       </Tabs>
 
       <DeploymentDrawer deploymentId={selectedDeployment} onClose={() => setSelectedDeployment(null)} />

@@ -47,6 +47,40 @@ it('rejects a missing artifact source', function () {
     $this->adapter->putArtifact($this->work.'/nope.zip', 'testproj');
 })->throws(StorageException::class);
 
+it('writes a shared file, reports its state, and overwrites its own managed file', function () {
+    $marker = '# Managed by cPorter';
+    $shared = $this->root.'/shared';
+
+    expect($this->adapter->sharedFileState($shared, '.env', $marker))
+        ->toBe(['exists' => false, 'managed' => false]);
+
+    expect($this->adapter->writeSharedFile($shared, '.env', "$marker\nA=\"1\"\n", $marker))->toBe('written')
+        ->and($this->adapter->sharedFileState($shared, '.env', $marker))
+        ->toBe(['exists' => true, 'managed' => true]);
+
+    // A managed file is overwritten without force.
+    expect($this->adapter->writeSharedFile($shared, '.env', "$marker\nA=\"2\"\n", $marker))->toBe('written')
+        ->and(file_get_contents($shared.'/.env'))->toContain('A="2"');
+});
+
+it('skips an unmanaged shared file unless forced', function () {
+    $marker = '# Managed by cPorter';
+    $shared = $this->root.'/shared';
+    File::makeDirectory($shared, 0777, true, true);
+    File::put($shared.'/.env', "HAND=made\n");
+
+    expect($this->adapter->sharedFileState($shared, '.env', $marker))
+        ->toBe(['exists' => true, 'managed' => false]);
+
+    // Without force: left untouched.
+    expect($this->adapter->writeSharedFile($shared, '.env', "$marker\nX=\"1\"\n", $marker))->toBe('skipped_unmanaged')
+        ->and(file_get_contents($shared.'/.env'))->toBe("HAND=made\n");
+
+    // With force: overwritten and now managed.
+    expect($this->adapter->writeSharedFile($shared, '.env', "$marker\nX=\"1\"\n", $marker, force: true))->toBe('written')
+        ->and($this->adapter->sharedFileState($shared, '.env', $marker)['managed'])->toBeTrue();
+});
+
 it('rejects an oversized artifact', function () {
     $adapter = new CpanelFilesystemAdapter(new PathJail([$this->root]), maxBytes: 8);
     $src = $this->work.'/big.zip';

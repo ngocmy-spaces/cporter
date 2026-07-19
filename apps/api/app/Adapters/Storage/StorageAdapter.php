@@ -33,6 +33,28 @@ interface StorageAdapter
     public function linkShared(string $releaseDir, string $sharedDir, array $sharedPaths): void;
 
     /**
+     * Write a cPorter-managed file into $sharedDir (e.g. shared/.env from managed env vars,
+     * docs/SPEC.md §9). $content's first line MUST be $managedMarker, the ownership sentinel.
+     *
+     * Ownership rule (never clobber a hand-created file):
+     *   - target absent, or present with a first line starting with $managedMarker → write it.
+     *   - present WITHOUT the marker and ! $force → skip (leave the file untouched).
+     *   - $force → overwrite regardless (operator taking the file over from the UI).
+     *
+     * @return 'written'|'skipped_unmanaged'
+     */
+    public function writeSharedFile(string $sharedDir, string $relativePath, string $content, string $managedMarker, bool $force = false): string;
+
+    /**
+     * Inspect a shared file's presence and cPorter-ownership without modifying it, so the UI can
+     * decide whether to show the conflict warning / force-adopt action.
+     *
+     * @return array{exists: bool, managed: bool}
+     *                                            managed = the file exists and its first line starts with $managedMarker
+     */
+    public function sharedFileState(string $sharedDir, string $relativePath, string $managedMarker): array;
+
+    /**
      * Delete releases beyond the newest $keep.
      *
      * @return list<string> removed release ids
@@ -65,7 +87,7 @@ interface StorageAdapter
      * a file is stat'd, and a not-yet-created entry reports 0.
      *
      * @param  array<int, mixed>  $sharedPaths  the project's shared_paths (each a {path, type} pair or legacy string)
-     * @return array<string, int>               relative path => bytes
+     * @return array<string, int> relative path => bytes
      */
     public function sharedPathSizes(string $projectBasePath, array $sharedPaths): array;
 

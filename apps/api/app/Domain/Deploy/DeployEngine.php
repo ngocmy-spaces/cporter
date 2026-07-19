@@ -58,7 +58,9 @@ class DeployEngine
                 $this->storage->extractZip((string) $artifact->storage_path, $release->path);
             });
 
-            $steps->run('link_shared', fn () => $this->storage->linkShared($release->path, $this->sharedDir($project), $project->shared_paths ?? []));
+            $sharedPaths = $this->writeEnv($steps, $project);
+
+            $steps->run('link_shared', fn () => $this->storage->linkShared($release->path, $this->sharedDir($project), $sharedPaths));
 
             $steps->run('validate', function () use ($project, $release) {
                 $this->validateStructure($project, $release->path);
@@ -264,5 +266,59 @@ class DeployEngine
     private function sharedDir(Project $project): string
     {
         return rtrim($project->base_path, '/').'/shared';
+    }
+
+    /**
+     * Render the project's managed env vars into shared/.env before link_shared (docs/SPEC.md §9),
+     * so the running app — and hooks like `php artisan config:cache` — see it. Never fails the
+     * deploy: an existing hand-created (unmanaged) shared/.env is left untouched and the step is
+     * recorded as a warning. Returns the shared_paths to link, with `.env` ensured present only
+     * when cPorter actually wrote the file (so its own file gets symlinked into the release).
+     *
+     * @return list<array{path: string, type: string}>
+     */
+    private function writeEnv(StepRunner $steps, Project $project): array
+    {
+        $sharedPaths = $project->shared_paths ?? [];
+        $envVars = $project->env_vars ?? [];
+
+        if ($envVars === []) {
+            return $sharedPaths;
+        }
+
+        $result = $this->storage->writeSharedFile(
+            $this->sharedDir($project),
+            '.env',
+            EnvFileRenderer::render($envVars),
+            EnvFileRenderer::MARKER,
+        );
+
+        if ($result === 'written') {
+            $steps->record('write_env', true);
+            if (! $this->hasSharedPath($sharedPaths, '.env')) {
+                $sharedPaths[] = ['path' => '.env', 'type' => 'file'];
+            }
+        } else { // skipped_unmanaged — respect the operator's existing file, keep their shared_paths as-is
+            $steps->warn('write_env',
+                'shared/.env exists and is not managed by cPorter — kept the existing file and skipped '
+                .'writing env vars. Use "Let cPorter manage this file" in the Environment tab to take it over.');
+        }
+
+        return $sharedPaths;
+    }
+
+    /**
+     * @param  list<mixed>  $sharedPaths
+     */
+    private function hasSharedPath(array $sharedPaths, string $rel): bool
+    {
+        foreach ($sharedPaths as $entry) {
+            $path = is_string($entry) ? $entry : (is_array($entry) ? ($entry['path'] ?? null) : null);
+            if (is_string($path) && trim($path) === $rel) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

@@ -95,9 +95,29 @@ export interface Project {
 
 export interface DeploymentStep {
   name: string;
-  status: 'success' | 'failed';
+  /** `warning` = a non-fatal step (e.g. write_env skipping an unmanaged shared/.env). */
+  status: 'success' | 'failed' | 'warning';
   duration_ms: number;
   error?: string;
+  note?: string;
+}
+
+/** One managed environment variable rendered into shared/.env on deploy (docs/API.md — /projects/{slug}/env). */
+export interface EnvVar {
+  key: string;
+  value: string;
+}
+
+/** On-disk state of shared/.env, so the UI can offer take-over of a hand-created file. */
+export interface EnvFileState {
+  exists: boolean;
+  managed: boolean;
+}
+
+/** Payload of GET/PUT/adopt on /projects/{slug}/env. */
+export interface ProjectEnv {
+  vars: EnvVar[];
+  file: EnvFileState;
 }
 
 export interface Release {

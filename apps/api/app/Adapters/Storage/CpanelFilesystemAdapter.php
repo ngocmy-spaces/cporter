@@ -188,6 +188,48 @@ class CpanelFilesystemAdapter implements StorageAdapter
         }
     }
 
+    public function writeSharedFile(string $sharedDir, string $relativePath, string $content, string $managedMarker, bool $force = false): string
+    {
+        $shared = $this->jail->assertInside($sharedDir);
+        if (! is_dir($shared) && ! @mkdir($shared, 0775, true) && ! is_dir($shared)) {
+            throw new StorageException("Failed to create shared directory: {$shared}");
+        }
+
+        $target = $this->jailedSharedTarget($shared, $relativePath);
+
+        // Ownership guard: never clobber a file we didn't write (e.g. a hand-created shared/.env)
+        // unless the caller forces a takeover (docs/SPEC.md §9).
+        if (! $force && (is_file($target) || is_link($target)) && ! $this->hasManagedMarker($target, $managedMarker)) {
+            return 'skipped_unmanaged';
+        }
+
+        $this->ensureParent($target);
+
+        $tmp = $target.'.tmp-'.bin2hex(random_bytes(4));
+        if (@file_put_contents($tmp, $content) === false) {
+            @unlink($tmp);
+            throw new StorageException('Failed to write shared file: '.basename($target));
+        }
+        if (! @rename($tmp, $target)) { // atomic replace
+            @unlink($tmp);
+            throw new StorageException('Failed to move shared file into place: '.basename($target));
+        }
+
+        return 'written';
+    }
+
+    public function sharedFileState(string $sharedDir, string $relativePath, string $managedMarker): array
+    {
+        $shared = $this->jail->assertInside($sharedDir);
+        $target = $this->jailedSharedTarget($shared, $relativePath);
+
+        if (! is_file($target) && ! is_link($target)) {
+            return ['exists' => false, 'managed' => false];
+        }
+
+        return ['exists' => true, 'managed' => $this->hasManagedMarker($target, $managedMarker)];
+    }
+
     public function pruneReleases(string $projectBasePath, int $keep): array
     {
         $releasesDir = $this->jailedLeaf($this->trailingChild($projectBasePath, 'releases'));
@@ -569,6 +611,30 @@ class CpanelFilesystemAdapter implements StorageAdapter
         if (! is_dir($parent) && ! @mkdir($parent, 0775, true) && ! is_dir($parent)) {
             throw new StorageException("Failed to create directory: {$parent}");
         }
+    }
+
+    /** Confine a relative path to the already-jailed shared dir and return the absolute target. */
+    private function jailedSharedTarget(string $shared, string $relativePath): string
+    {
+        $rel = trim($relativePath, '/');
+        if ($rel === '') {
+            throw new StorageException('Shared file relative path is empty.');
+        }
+
+        return (new PathJail([$shared]))->assertInside($shared.'/'.$rel);
+    }
+
+    /** True if the file's first line starts with $marker (cPorter owns it). */
+    private function hasManagedMarker(string $path, string $marker): bool
+    {
+        $handle = @fopen($path, 'rb');
+        if ($handle === false) {
+            return false;
+        }
+        $firstLine = fgets($handle);
+        fclose($handle);
+
+        return is_string($firstLine) && str_starts_with(rtrim($firstLine, "\r\n"), $marker);
     }
 
     private function trySymlinkSwap(string $target, string $link): bool
