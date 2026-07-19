@@ -104,6 +104,7 @@ deploys), `queue:work` (artifact extraction), and `cporter:housekeep` (timeout/l
 
 - 📄 [Technical specification (SPEC)](docs/SPEC.md)
 - 🚀 [Deploying cPorter to cPanel](docs/DEPLOYMENT-CPANEL.md)
+- 📦 [Releasing & maintaining the npm packages + GitHub Action](docs/RELEASING.md)
 - ✅ [Task breakdown by phase](TASKS.md)
 
 ## Status
