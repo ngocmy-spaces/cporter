@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import {
   ActionIcon,
@@ -30,7 +30,7 @@ import {
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { useForm } from '@mantine/form';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import {
@@ -38,6 +38,7 @@ import {
   IconChecklist,
   IconCheck,
   IconClock,
+  IconCopy,
   IconExternalLink,
   IconFolders,
   IconInfoCircle,
@@ -56,6 +57,7 @@ import { formatBytes, formatDateTime, formatRelativeTime } from '@/lib/format';
 import type {
   ApiEnvelope,
   AuditLog,
+  Capabilities,
   Deployment,
   PreflightCheck,
   PreflightReport,
@@ -130,6 +132,69 @@ function summarizeActivityMeta(action: string, meta: Record<string, unknown> | n
   return '';
 }
 
+/**
+ * Shared loading/error/content switch for a Tabs.Panel backed by a single query. Renders a
+ * Loader while fetching, a retryable Alert on failure, and the panel's own table (with its
+ * empty-state row) once the query succeeds — keeping that logic out of each panel.
+ */
+function PanelBody({
+  query,
+  errorTitle,
+  children,
+}: {
+  query: UseQueryResult<unknown, unknown>;
+  errorTitle: string;
+  children: ReactNode;
+}) {
+  if (query.isLoading) {
+    return (
+      <Group justify="center" p="xl">
+        <Loader />
+      </Group>
+    );
+  }
+
+  if (query.isError) {
+    const message = axios.isAxiosError(query.error)
+      ? (query.error.response?.data as { error?: string } | undefined)?.error
+      : undefined;
+    return (
+      <Alert color="red" variant="light" icon={<IconAlertTriangle size={16} />} title={errorTitle} m="md">
+        <Stack gap="xs" align="flex-start">
+          <Text size="sm">{message ?? 'Something went wrong.'}</Text>
+          <Button variant="light" size="xs" onClick={() => query.refetch()}>
+            Retry
+          </Button>
+        </Stack>
+      </Alert>
+    );
+  }
+
+  return <>{children}</>;
+}
+
+/** Strip trailing slashes from the base directory prefix. */
+const trimBaseDir = (dir: string) => dir.replace(/\/+$/, '');
+
+/** Join the fixed base directory with the user-typed subpath into an absolute path. */
+function composeBasePath(dir: string, subpath: string): string {
+  const sub = subpath.trim().replace(/^\/+/, '');
+  const base = trimBaseDir(dir);
+  return base ? `${base}/${sub}` : sub;
+}
+
+interface CloneFormValues {
+  name: string;
+  base_dir: string;
+  base_subpath: string;
+}
+
+const CLONE_INITIAL_VALUES: CloneFormValues = {
+  name: '',
+  base_dir: '',
+  base_subpath: '',
+};
+
 interface ProjectEditFormValues {
   name: string;
   type: string;
@@ -158,10 +223,12 @@ export function ProjectDetailPage() {
   const [selectedDeployment, setSelectedDeployment] = useState<number | null>(null);
   const [sharedOpened, { open: openShared, close: closeShared }] = useDisclosure(false);
   const [editOpened, { open: openEditDisclosure, close: closeEditDisclosure }] = useDisclosure(false);
+  const [cloneOpened, { open: openCloneDisclosure, close: closeCloneDisclosure }] = useDisclosure(false);
   const [deleteOpened, { open: openDeleteDisclosure, close: closeDeleteDisclosure }] = useDisclosure(false);
   const [purge, setPurge] = useState<'none' | 'releases' | 'all'>('none');
   const [preflightOpened, { open: openPreflightModal, close: closePreflightModal }] = useDisclosure(false);
   const [preflightReport, setPreflightReport] = useState<PreflightReport | null>(null);
+  const [activeTab, setActiveTab] = useState<string | null>('deployments');
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -172,6 +239,34 @@ export function ProjectDetailPage() {
       name: (value) => (value.trim().length > 0 ? null : 'Name is required'),
     },
   });
+
+  const cloneForm = useForm<CloneFormValues>({
+    initialValues: CLONE_INITIAL_VALUES,
+    validate: {
+      name: (value) => (value.trim().length > 0 ? null : 'Name is required'),
+      base_subpath: (value) => (value.trim().length > 0 ? null : 'A project folder is required'),
+    },
+  });
+
+  // Allowed base paths come from the server's capability probe (CPORTER_ALLOWED_BASE_PATHS) so the
+  // clone form can pin the prefix instead of asking the user to retype the jail root.
+  // NOTE: keep this query's shape identical to ProjectsPage/SettingsPage — all three share the
+  // ['system','capabilities'] cache key, so the resolved envelope must match or another page reads
+  // an unexpected shape and crashes on `.map`.
+  const capabilities = useQuery({
+    queryKey: ['system', 'capabilities'],
+    queryFn: async () =>
+      (await api.get<{ data: Capabilities; probed_at: string }>('/system/capabilities')).data,
+  });
+  const allowedBasePaths = capabilities.data?.data?.allowed_base_paths?.map((entry) => entry.path) ?? [];
+
+  // Pin the base directory to the first allowed path once capabilities load (or on reopen).
+  useEffect(() => {
+    if (cloneOpened && !cloneForm.values.base_dir && allowedBasePaths.length > 0) {
+      cloneForm.setFieldValue('base_dir', allowedBasePaths[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloneOpened, allowedBasePaths.length]);
 
   const project = useQuery({
     queryKey: ['projects', slug],
@@ -199,7 +294,8 @@ export function ProjectDetailPage() {
   const activity = useQuery({
     queryKey: ['projects', slug, 'activity'],
     queryFn: async () => (await api.get<ApiEnvelope<AuditLog[]>>(`/projects/${slug}/activity`)).data.data,
-    enabled: !!slug,
+    // Deferred: only fetched once the Activity tab is actually opened.
+    enabled: !!slug && activeTab === 'activity',
   });
 
   const activate = useMutation({
@@ -338,6 +434,49 @@ export function ProjectDetailPage() {
     },
   });
 
+  const closeCloneModal = () => {
+    closeCloneDisclosure();
+    cloneForm.reset();
+  };
+
+  const cloneProject = useMutation({
+    mutationFn: async (values: CloneFormValues) => {
+      const payload = {
+        name: values.name,
+        base_path: composeBasePath(values.base_dir, values.base_subpath),
+      };
+      return (await api.post<ApiEnvelope<Project>>(`/projects/${slug}/clone`, payload)).data.data;
+    },
+    onSuccess: (cloned) => {
+      notifications.show({
+        color: 'green',
+        title: 'Project cloned',
+        message: `${cloned.name} was created from this project's configuration.`,
+        icon: <IconCheck size={16} />,
+      });
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      closeCloneModal();
+      navigate(`/projects/${cloned.slug}`);
+    },
+    onError: (error) => {
+      if (axios.isAxiosError(error) && error.response?.status === 422) {
+        const errors = error.response.data?.errors as Record<string, string[]> | undefined;
+        if (errors) {
+          cloneForm.setErrors(
+            Object.fromEntries(
+              // The server validates the composed `base_path`; surface that on the subpath input
+              // (also used as the fallback absolute-path field when no base paths are configured).
+              Object.entries(errors).map(([field, messages]) => [
+                field === 'base_path' ? 'base_subpath' : field,
+                messages[0],
+              ]),
+            ),
+          );
+        }
+      }
+    },
+  });
+
   const toggleStatus = useMutation({
     mutationFn: async (status: ProjectStatus) =>
       (await api.patch<ApiEnvelope<Project>>(`/projects/${slug}`, { status })).data.data,
@@ -427,6 +566,11 @@ export function ProjectDetailPage() {
   const lastDeployment = (deployments.data ?? [])[0] ?? null;
   const diskBusy = p.disk_usage_status === 'running' || recomputeDisk.isPending;
 
+  const noBasePaths = !capabilities.isLoading && allowedBasePaths.length === 0;
+  const cloneBasePrefix = cloneForm.values.base_dir ? `${trimBaseDir(cloneForm.values.base_dir)}/` : '';
+  const cloneComposedBasePath = composeBasePath(cloneForm.values.base_dir, cloneForm.values.base_subpath);
+  const clonePrefixWidth = cloneBasePrefix ? Math.min(cloneBasePrefix.length * 8 + 16, 240) : undefined;
+
   const openEditModal = () => {
     editForm.reset();
     editForm.setValues({
@@ -443,6 +587,12 @@ export function ProjectDetailPage() {
       },
     });
     openEditDisclosure();
+  };
+
+  const openCloneModal = () => {
+    cloneForm.reset();
+    cloneForm.setFieldValue('name', `${p.name} (copy)`);
+    openCloneDisclosure();
   };
 
   const confirmToggleStatus = () => {
@@ -472,25 +622,29 @@ export function ProjectDetailPage() {
       </Breadcrumbs>
 
       <Group justify="space-between" align="flex-start">
-        <div>
-          <Title order={2}>{p.name}</Title>
-          <Text c="dimmed" size="sm">
-            {p.base_path}
-          </Text>
-        </div>
+        <Stack gap={4}>
+          <Group gap="sm" align="center" wrap="nowrap">
+            <Title order={2}>{p.name}</Title>
+            {p.health_check_url && (
+              <Anchor href={p.health_check_url} target="_blank" rel="noreferrer" size="sm">
+                <Group gap={4} wrap="nowrap">
+                  <IconExternalLink size={14} />
+                  Health URL
+                </Group>
+              </Anchor>
+            )}
+          </Group>
+          <Group gap="xs" align="center">
+            <Badge color={p.status === 'active' ? 'green' : 'gray'} variant="light">
+              {p.status}
+            </Badge>
+            <Badge variant="light">{p.type}</Badge>
+            <Text c="dimmed" size="sm">
+              {p.base_path}
+            </Text>
+          </Group>
+        </Stack>
         <Group gap="xs">
-          {p.health_check_url && (
-            <Anchor href={p.health_check_url} target="_blank" rel="noreferrer" size="sm">
-              <Group gap={4} wrap="nowrap">
-                <IconExternalLink size={14} />
-                Health URL
-              </Group>
-            </Anchor>
-          )}
-          <Badge variant="light">{p.type}</Badge>
-          <Badge color={p.status === 'active' ? 'green' : 'gray'} variant="light">
-            {p.status}
-          </Badge>
           {isAdmin && (
             <Button
               variant="light"
@@ -499,6 +653,16 @@ export function ProjectDetailPage() {
               onClick={openEditModal}
             >
               Edit
+            </Button>
+          )}
+          {isAdmin && (
+            <Button
+              variant="light"
+              size="xs"
+              leftSection={<IconCopy size={14} />}
+              onClick={openCloneModal}
+            >
+              Clone
             </Button>
           )}
           {isAdmin && (
@@ -622,7 +786,7 @@ export function ProjectDetailPage() {
         </SimpleGrid>
       </Card>
 
-      <Tabs defaultValue="deployments">
+      <Tabs value={activeTab} onChange={setActiveTab}>
         <Tabs.List>
           <Tabs.Tab value="deployments">Deployments</Tabs.Tab>
           <Tabs.Tab value="releases">Releases</Tabs.Tab>
@@ -631,11 +795,7 @@ export function ProjectDetailPage() {
 
         <Tabs.Panel value="deployments" pt="md">
           <Paper withBorder radius="md">
-            {deployments.isLoading ? (
-              <Group justify="center" p="xl">
-                <Loader />
-              </Group>
-            ) : (
+            <PanelBody query={deployments} errorTitle="Couldn't load deployments">
               <Table.ScrollContainer minWidth={600}>
                 <Table highlightOnHover verticalSpacing="sm">
                   <Table.Thead>
@@ -673,17 +833,13 @@ export function ProjectDetailPage() {
                   </Table.Tbody>
                 </Table>
               </Table.ScrollContainer>
-            )}
+            </PanelBody>
           </Paper>
         </Tabs.Panel>
 
         <Tabs.Panel value="releases" pt="md">
           <Paper withBorder radius="md">
-            {releases.isLoading ? (
-              <Group justify="center" p="xl">
-                <Loader />
-              </Group>
-            ) : (
+            <PanelBody query={releases} errorTitle="Couldn't load releases">
               <Table.ScrollContainer minWidth={600}>
                 <Table highlightOnHover verticalSpacing="sm">
                   <Table.Thead>
@@ -745,17 +901,13 @@ export function ProjectDetailPage() {
                   </Table.Tbody>
                 </Table>
               </Table.ScrollContainer>
-            )}
+            </PanelBody>
           </Paper>
         </Tabs.Panel>
 
         <Tabs.Panel value="activity" pt="md">
           <Paper withBorder radius="md">
-            {activity.isLoading ? (
-              <Group justify="center" p="xl">
-                <Loader />
-              </Group>
-            ) : (
+            <PanelBody query={activity} errorTitle="Couldn't load activity">
               <Table.ScrollContainer minWidth={600}>
                 <Table highlightOnHover verticalSpacing="sm">
                   <Table.Thead>
@@ -805,7 +957,7 @@ export function ProjectDetailPage() {
                   </Table.Tbody>
                 </Table>
               </Table.ScrollContainer>
-            )}
+            </PanelBody>
           </Paper>
         </Tabs.Panel>
       </Tabs>
@@ -1012,6 +1164,75 @@ export function ProjectDetailPage() {
             </Button>
           </Group>
         </Stack>
+      </Modal>
+
+      <Modal opened={cloneOpened} onClose={closeCloneModal} title="Clone project" size="lg">
+        <form onSubmit={cloneForm.onSubmit((values) => cloneProject.mutate(values))}>
+          <Stack gap="sm">
+            <Text size="xs" c="dimmed">
+              Copies configuration only — releases aren&apos;t cloned, and any shared files (e.g.{' '}
+              <Code>.env</Code>) must be copied into the new folder&apos;s <Code>shared/</Code>{' '}
+              manually.
+            </Text>
+            <TextInput
+              label="Name"
+              placeholder="My App (copy)"
+              required
+              {...cloneForm.getInputProps('name')}
+            />
+            {noBasePaths ? (
+              <TextInput
+                label="Base path"
+                placeholder="/home/user/my-app-copy"
+                description="No allowed base paths are configured (CPORTER_ALLOWED_BASE_PATHS is empty) — enter a full absolute path."
+                required
+                {...cloneForm.getInputProps('base_subpath')}
+              />
+            ) : (
+              <Stack gap="xs">
+                {allowedBasePaths.length > 1 && (
+                  <Select
+                    label="Base directory"
+                    description="Deploy jail root — the project folder is created inside it."
+                    data={allowedBasePaths}
+                    allowDeselect={false}
+                    {...cloneForm.getInputProps('base_dir')}
+                  />
+                )}
+                <TextInput
+                  label="Project folder"
+                  placeholder="my-app-copy"
+                  required
+                  description={
+                    cloneForm.values.base_subpath.trim() ? (
+                      <>
+                        Full path: <Code>{cloneComposedBasePath}</Code>
+                      </>
+                    ) : (
+                      'Only the folder inside the base directory — the prefix above is fixed for you.'
+                    )
+                  }
+                  leftSection={
+                    <Text ff="monospace" size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+                      {cloneBasePrefix}
+                    </Text>
+                  }
+                  leftSectionPointerEvents="none"
+                  leftSectionWidth={clonePrefixWidth}
+                  {...cloneForm.getInputProps('base_subpath')}
+                />
+              </Stack>
+            )}
+            <Group justify="flex-end" mt="md">
+              <Button variant="default" onClick={closeCloneModal}>
+                Cancel
+              </Button>
+              <Button type="submit" loading={cloneProject.isPending}>
+                Clone
+              </Button>
+            </Group>
+          </Stack>
+        </form>
       </Modal>
 
       <Modal opened={preflightOpened} onClose={closePreflightModal} title="Host preflight check" size="lg">
