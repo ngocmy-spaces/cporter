@@ -2,7 +2,7 @@ import { Divider, Drawer, Group, Loader, Stack, Text, Timeline } from '@mantine/
 import { IconCheck, IconX } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { formatDateTime } from '@/lib/format';
+import { formatBytes, formatDateTime } from '@/lib/format';
 import { DeploymentStatusBadge } from '@/components/StatusBadge';
 import type { ApiEnvelope, Deployment, DeploymentStatus } from '@/lib/types';
 
@@ -56,6 +56,7 @@ export function DeploymentDrawer({
           <Stack gap={4}>
             <Meta label="Trigger" value={deployment.trigger} />
             <Meta label="Actor" value={deployment.actor ?? '—'} />
+            <Meta label="Bundle size" value={formatBytes(deployment.release?.artifact?.size)} />
             <Meta label="Started" value={formatDateTime(deployment.started_at)} />
             <Meta label="Finished" value={formatDateTime(deployment.finished_at)} />
           </Stack>

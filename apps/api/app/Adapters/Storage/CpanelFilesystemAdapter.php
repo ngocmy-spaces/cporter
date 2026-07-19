@@ -229,6 +229,38 @@ class CpanelFilesystemAdapter implements StorageAdapter
         return $removed;
     }
 
+    public function diskUsage(string $projectBasePath): int
+    {
+        $releasesDir = $this->jailedLeaf($this->trailingChild($projectBasePath, 'releases'));
+        if (! is_dir($releasesDir)) {
+            return 0;
+        }
+
+        return $this->dirBytes($releasesDir);
+    }
+
+    /** Recursively sum real file sizes under $dir, never following symlinks. */
+    private function dirBytes(string $dir): int
+    {
+        $total = 0;
+        foreach (scandir($dir) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $path = $dir.'/'.$entry;
+            if (is_link($path)) {
+                continue; // shared/ + current symlinks — skip to avoid double counting
+            }
+            if (is_dir($path)) {
+                $total += $this->dirBytes($path);
+            } elseif (is_file($path)) {
+                $total += filesize($path) ?: 0;
+            }
+        }
+
+        return $total;
+    }
+
     public function acquireLock(string $projectBasePath): bool
     {
         $lock = $this->jailedLeaf($this->trailingChild($projectBasePath, 'deploy.lock'));

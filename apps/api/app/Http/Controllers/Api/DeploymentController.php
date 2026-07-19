@@ -211,7 +211,7 @@ class DeploymentController extends Controller
     /** A single deployment (global path, admin) — used for step polling in the UI. */
     public function detail(Deployment $deployment): JsonResponse
     {
-        return response()->json(['data' => $deployment->load(['project', 'release'])]);
+        return response()->json(['data' => $deployment->load(['project', 'release.artifact'])]);
     }
 
     private function guardProjectScope(Request $request, Project $project): ?JsonResponse

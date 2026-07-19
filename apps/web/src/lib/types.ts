@@ -66,6 +66,7 @@ export interface Project {
   docroot_subpath: string | null;
   php_binary: string | null;
   keep_releases: number;
+  disk_usage: number;
   health_check_url: string | null;
   shared_paths: SharedPath[];
   hooks: Record<string, unknown> | null;

@@ -102,8 +102,9 @@ async function deploy(parsed: ParsedArgs): Promise<number> {
     idempotencyKey: str(flags, 'idempotency-key'),
     chunked: bool(flags, 'chunked', false) || undefined,
     onProgress: (p) => {
-      if (p.phase === 'hashing') info('  hashing artifact…');
-      else if (p.phase === 'uploading') info('  uploading…');
+      if (p.phase === 'hashing') {
+        info(`  hashing artifact…${p.totalBytes ? ` (${formatBytes(p.totalBytes)})` : ''}`);
+      } else if (p.phase === 'uploading') info('  uploading…');
       else if (p.phase === 'chunk' && p.totalBytes) {
         const pct = Math.round(((p.uploadedBytes ?? 0) / p.totalBytes) * 100);
         info(`  uploading chunk ${(p.chunkIndex ?? 0) + 1}/${p.chunkCount} (${pct}%)`);
@@ -210,6 +211,17 @@ function output(flags: Record<string, string | boolean>, data: unknown, human: s
 
 function info(message: string): void {
   process.stderr.write(`${message}\n`);
+}
+
+function formatBytes(bytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(unit > 0 ? 1 : 0)} ${units[unit]}`;
 }
 
 function fail(message: string): void {

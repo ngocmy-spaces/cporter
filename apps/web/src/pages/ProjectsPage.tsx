@@ -124,11 +124,16 @@ export function ProjectsPage() {
 
   // Allowed base paths come from the server's capability probe (CPORTER_ALLOWED_BASE_PATHS)
   // so the form can pin the prefix instead of asking the user to retype the jail root.
+  // NOTE: keep this query's shape identical to SettingsPage — both share the
+  // ['system','capabilities'] cache key, so the resolved envelope must match or the
+  // other page reads an unexpected shape and crashes on `.map`.
   const capabilities = useQuery({
     queryKey: ['system', 'capabilities'],
-    queryFn: async () => (await api.get<{ data: Capabilities }>('/system/capabilities')).data.data,
+    queryFn: async () =>
+      (await api.get<{ data: Capabilities; probed_at: string }>('/system/capabilities')).data,
   });
-  const allowedBasePaths = capabilities.data?.allowed_base_paths.map((entry) => entry.path) ?? [];
+  const allowedBasePaths =
+    capabilities.data?.data?.allowed_base_paths?.map((entry) => entry.path) ?? [];
 
   const form = useForm<ProjectFormValues>({
     initialValues: INITIAL_VALUES,

@@ -39,6 +39,12 @@ interface StorageAdapter
      */
     public function pruneReleases(string $projectBasePath, int $keep): array;
 
+    /**
+     * Total bytes of the project's retained release directories (<base_path>/releases).
+     * Symlinks (shared/, current) are not followed, so shared content is not double-counted.
+     */
+    public function diskUsage(string $projectBasePath): int;
+
     /** Acquire the per-project deploy lock (atomic O_EXCL). Returns false if already locked. */
     public function acquireLock(string $projectBasePath): bool;
 

@@ -141,6 +141,7 @@ class DeployEngine
             }
 
             $steps->run('prune', fn () => $this->storage->pruneReleases($project->base_path, $project->keep_releases));
+            $project->forceFill(['disk_usage' => $this->storage->diskUsage($project->base_path)])->save();
             $deployment->forceFill(['status' => DeploymentStatus::Success, 'finished_at' => now()])->save();
         } catch (Throwable $e) {
             if ($activated) {

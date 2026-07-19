@@ -25,6 +25,7 @@ class Project extends Model
         'docroot_subpath',
         'php_binary',
         'keep_releases',
+        'disk_usage',
         'health_check_url',
         'shared_paths',
         'hooks',
@@ -50,6 +51,7 @@ class Project extends Model
             'status' => ProjectStatus::class,
             'hooks' => 'array',
             'keep_releases' => 'integer',
+            'disk_usage' => 'integer',
         ];
     }
 

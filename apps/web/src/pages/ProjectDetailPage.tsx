@@ -26,7 +26,7 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { DeploymentDrawer } from '@/components/DeploymentDrawer';
 import { DeploymentStatusBadge, ReleaseStateBadge } from '@/components/StatusBadge';
-import { formatDateTime, formatRelativeTime } from '@/lib/format';
+import { formatBytes, formatDateTime, formatRelativeTime } from '@/lib/format';
 import type { ApiEnvelope, Deployment, Project, Release } from '@/lib/types';
 
 export function ProjectDetailPage() {
@@ -190,6 +190,9 @@ export function ProjectDetailPage() {
             <Info label="Keep releases">
               <Text size="sm">{p.keep_releases}</Text>
             </Info>
+            <Info label="Disk usage">
+              <Text size="sm">{formatBytes(p.disk_usage)}</Text>
+            </Info>
             <Info label="PHP binary">
               <Text size="sm">{p.php_binary || '—'}</Text>
             </Info>
@@ -289,6 +292,7 @@ export function ProjectDetailPage() {
                     <Table.Tr>
                       <Table.Th>Version</Table.Th>
                       <Table.Th>State</Table.Th>
+                      <Table.Th>Size</Table.Th>
                       <Table.Th>Activated</Table.Th>
                       <Table.Th />
                     </Table.Tr>
@@ -314,6 +318,7 @@ export function ProjectDetailPage() {
                         <Table.Td>
                           <ReleaseStateBadge state={r.state} />
                         </Table.Td>
+                        <Table.Td>{formatBytes(r.artifact?.size)}</Table.Td>
                         <Table.Td>{formatDateTime(r.activated_at)}</Table.Td>
                         <Table.Td>
                           {r.state === 'active' ? (
@@ -332,7 +337,7 @@ export function ProjectDetailPage() {
                     ))}
                     {releases.data?.length === 0 && (
                       <Table.Tr>
-                        <Table.Td colSpan={4}>
+                        <Table.Td colSpan={5}>
                           <Text c="dimmed" size="sm">
                             No releases yet.
                           </Text>
