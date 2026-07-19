@@ -13,6 +13,8 @@
     "build:web": "pnpm --filter @cporter/web build",
     "lint:web": "pnpm --filter @cporter/web lint",
     "typecheck:web": "pnpm --filter @cporter/web typecheck",
+    "build:packages": "pnpm --filter \"./packages/*\" -r build",
+    "typecheck:packages": "pnpm --filter \"./packages/*\" -r typecheck",
     "build:artifact": "node build/build-artifact.mjs"
   },
   "devDependencies": {

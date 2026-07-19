@@ -1,0 +1,27 @@
+{
+  "name": "@cporter/cli",
+  "version": "0.1.0",
+  "description": "Command-line client for cPorter — deploy artifacts, poll status, and roll back from any CI or shell.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "cporter": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@cporter/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

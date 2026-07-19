@@ -11,10 +11,30 @@ cporter/
 ├── apps/
 │   ├── api/          # Laravel 12 — Deploy API + Core Engine + Admin API
 │   └── web/          # React + Vite + TS — Admin Panel SPA
+├── packages/
+│   ├── sdk/           # @cporter/sdk — TypeScript SDK (shared deploy client core)
+│   ├── cli/           # @cporter/cli — command-line deploy client
+│   ├── mcp/           # @cporter/mcp — MCP server (deploy tools for AI agents)
+│   └── github-action/ # composite GitHub Action wrapping the CLI
 ├── build/            # build-artifact.mjs → bundles FE+BE into a single deployable .zip
 ├── docs/SPEC.md      # Full technical specification
 └── TASKS.md          # Task breakdown by phase
 ```
+
+## Integrating deployments
+
+The deploy API (`/api/v1`, API-key auth) is wrapped by a layered set of integrations, all
+built on one TypeScript core so the contract lives in one place:
+
+| Surface | Package | Use it for |
+|---|---|---|
+| **CLI** | [`@cporter/cli`](packages/cli) | `npx @cporter/cli deploy ./out.zip …` from any shell or CI |
+| **GitHub Action** | [`packages/github-action`](packages/github-action) | one `uses:` step in a workflow |
+| **SDK** | [`@cporter/sdk`](packages/sdk) | programmatic deploys from Node/TS |
+| **MCP server** | [`@cporter/mcp`](packages/mcp) | let an AI agent deploy / roll back |
+
+Build them all: `pnpm build:packages`. End-user guides live in the app's public **/docs**
+area.
 
 On deploy: `apps/web` builds to static → copied into `apps/api/public`; Laravel serves `/api/v1/*` as JSON
 and falls back other routes to the SPA. The cPanel docroot points to `deploy.domain/current/public`.
