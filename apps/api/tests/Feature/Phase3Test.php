@@ -35,6 +35,53 @@ it('records an audit entry on project creation and lists it', function () {
         ->assertJsonPath('data.0.actor', $this->admin->email);
 });
 
+it('returns a project-scoped activity feed, isolated per project', function () {
+    $other = sys_get_temp_dir().'/cporter_p3_other_'.uniqid();
+    File::makeDirectory($other, 0777, true, true);
+    config(['cporter.allowed_base_paths' => [$this->base, $other]]);
+    app()->forgetInstance(PathJail::class);
+
+    $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+        'name' => 'Alpha', 'base_path' => $this->base, 'type' => 'static',
+    ])->assertCreated();
+    $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+        'name' => 'Beta', 'base_path' => $other, 'type' => 'static',
+    ])->assertCreated();
+
+    // Add a second event to alpha so its feed has more than one entry.
+    $this->actingAs($this->admin)->patchJson('/api/v1/projects/alpha', ['name' => 'Alpha 2'])->assertOk();
+
+    $this->actingAs($this->admin)->getJson('/api/v1/projects/alpha/activity')
+        ->assertOk()
+        ->assertJsonPath('data.0.action', 'project.updated')
+        ->assertJsonPath('data.1.action', 'project.created')
+        ->assertJsonCount(2, 'data');
+
+    File::deleteDirectory($other);
+});
+
+it('filters the project activity feed by action', function () {
+    $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+        'name' => 'Gamma', 'base_path' => $this->base, 'type' => 'static',
+    ])->assertCreated();
+    $this->actingAs($this->admin)->postJson('/api/v1/projects/gamma/preflight')->assertOk();
+
+    $this->actingAs($this->admin)->getJson('/api/v1/projects/gamma/activity?action=project.preflight')
+        ->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.action', 'project.preflight');
+});
+
+it('lets a viewer read a project activity feed', function () {
+    $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+        'name' => 'Delta', 'base_path' => $this->base, 'type' => 'static',
+    ])->assertCreated();
+
+    $this->actingAs($this->viewer)->getJson('/api/v1/projects/delta/activity')
+        ->assertOk()
+        ->assertJsonPath('data.0.action', 'project.created');
+});
+
 // ── T3.2 Roles ──────────────────────────────────────────────────────────────
 
 it('lets a viewer read but not write', function () {

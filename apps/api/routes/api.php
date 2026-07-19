@@ -46,6 +46,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/projects/{project}', [ProjectController::class, 'show']);
             Route::get('/projects/{project}/deployments', [DeploymentController::class, 'index']);
             Route::get('/projects/{project}/releases', [ReleaseController::class, 'index']);
+            Route::get('/projects/{project}/activity', [AuditController::class, 'project']);
             Route::post('/projects/{project}/disk-usage/recompute', [ProjectController::class, 'recomputeDiskUsage']);
             Route::get('/deployments', [DeploymentController::class, 'recent']);
             Route::get('/deployments/{deployment}', [DeploymentController::class, 'detail']);
