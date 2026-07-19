@@ -113,7 +113,9 @@ Used only by the SPA. **Not reachable with an API key** (session guard). Listed 
 | POST | `/projects/{slug}/preflight` | admin | (re-)run host preflight: idempotently ensure `releases/` + `shared/`, probe symlink support, inspect `current`, flag missing shared files + the manual Document-Root step → `{ data: <report> }` |
 | PATCH | `/projects/{slug}` | admin | update project config; `status: disabled` blocks new deploys. `slug`/`base_path`/`type` are frozen once releases exist |
 | DELETE | `/projects/{slug}` | admin | soft-delete a project. Body `purge`: `none` (default — hide only, files kept, `200`) · `releases` (drop releases/ + `current`, keep shared/) · `all` (delete the whole base_path). A purge runs async: the project goes `deleting` (deploys blocked) and is hidden when done → `202` |
+| POST | `/projects/{slug}/disk-usage/recompute` | admin | recompute the on-disk footprint off-request; returns the project and sets `disk_usage_status: running` to poll. Idempotent while a run is in flight (unless >10 min stale) → `202` |
 | GET | `/projects/{slug}/deployments` · `/projects/{slug}/releases` | read | per-project history |
+| GET | `/projects/{slug}/activity` | read | project-scoped audit feed (create/update/preflight/delete…), newest first, `?action=` filter, capped at 200 |
 | GET | `/deployments` · `/deployments/{id}` | read | recent + detail |
 | POST | `/releases/{id}/activate` | admin | activate a release (rollback-from-UI) |
 | GET | `/audit-logs` | read | audit trail |
@@ -148,6 +150,23 @@ is `error`; `warning`/`manual`/`pending` do not fail it. cPorter **creates** `ba
 `shared/` (idempotent — never overwrites) but **never** creates `current` (`pending` until the first
 deploy) nor the domain's Document Root (`manual` — a cPanel vhost concern). A shared entry of type `file`
 absent from `shared/` is a `warning`: create it by hand or the deploy fails at `link_shared`.
+
+### Project disk fields
+
+The project object carries an on-disk footprint, refreshed by the deploy pipeline and by the recompute
+endpoint above (bytes; symlinks are never followed, so shared data is counted once):
+
+| Field | Meaning |
+|---|---|
+| `disk_usage` | live footprint — active release (`current`) + `shared/` |
+| `releases_disk_usage` | all retained release directories (rollback history) |
+| `disk_usage_status` | `idle` \| `running` (a recompute is in flight) |
+| `disk_usage_calculated_at` | when the figures were last computed (`null` if never) |
+| `shared_disk_usage` | per-shared-path bytes, keyed by the entry's relative path; `null` until first computed |
+
+```json
+"shared_disk_usage": { "storage": 20480, ".env": 512, "public/uploads": 1048576 }
+```
 
 ---
 

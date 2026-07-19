@@ -59,6 +59,16 @@ interface StorageAdapter
      */
     public function diskStats(string $projectBasePath): array;
 
+    /**
+     * Per-shared-path on-disk sizes in bytes, keyed by the entry's relative path. Each entry's
+     * real data lives at shared/<path>; a directory is walked recursively (symlinks skipped),
+     * a file is stat'd, and a not-yet-created entry reports 0.
+     *
+     * @param  array<int, mixed>  $sharedPaths  the project's shared_paths (each a {path, type} pair or legacy string)
+     * @return array<string, int>               relative path => bytes
+     */
+    public function sharedPathSizes(string $projectBasePath, array $sharedPaths): array;
+
     /** Acquire the per-project deploy lock (atomic O_EXCL). Returns false if already locked. */
     public function acquireLock(string $projectBasePath): bool;
 

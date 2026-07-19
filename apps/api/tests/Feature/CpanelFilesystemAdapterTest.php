@@ -102,3 +102,42 @@ it('rejects archives whose uncompressed size is too large', function () {
 
     $adapter->extractZip($zip, $this->root.'/releases/r4');
 })->throws(StorageException::class);
+
+it('sizes each shared path: dir walked, file stat, missing → 0', function () {
+    $base = $this->root.'/proj';
+    // A shared directory with two files (12 + 8 = 20 bytes) and a shared config file (5 bytes).
+    File::makeDirectory($base.'/shared/storage/logs', 0777, true, true);
+    File::put($base.'/shared/storage/app.txt', str_repeat('a', 12));
+    File::put($base.'/shared/storage/logs/l.txt', str_repeat('b', 8));
+    File::put($base.'/shared/.env', 'ABCDE');
+
+    $sizes = $this->adapter->sharedPathSizes($base, [
+        ['path' => 'storage', 'type' => 'dir'],
+        ['path' => '.env', 'type' => 'file'],
+        ['path' => 'missing', 'type' => 'dir'],
+    ]);
+
+    expect($sizes)->toBe([
+        'storage' => 20,
+        '.env' => 5,
+        'missing' => 0,
+    ]);
+});
+
+it('does not follow symlinks when sizing a shared dir', function () {
+    $base = $this->root.'/proj';
+    File::makeDirectory($base.'/shared/uploads', 0777, true, true);
+    File::put($base.'/shared/uploads/real.bin', str_repeat('x', 10));
+    // A symlink inside the shared dir must not be followed (would otherwise inflate the size).
+    File::put($this->work.'/outside.bin', str_repeat('y', 999));
+    symlink($this->work.'/outside.bin', $base.'/shared/uploads/link.bin');
+
+    $sizes = $this->adapter->sharedPathSizes($base, [['path' => 'uploads', 'type' => 'dir']]);
+
+    expect($sizes['uploads'])->toBe(10);
+});
+
+it('returns an empty map when the shared dir does not exist', function () {
+    expect($this->adapter->sharedPathSizes($this->root.'/proj', [['path' => 'x', 'type' => 'dir']]))
+        ->toBe([]);
+});

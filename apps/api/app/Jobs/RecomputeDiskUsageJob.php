@@ -38,10 +38,12 @@ class RecomputeDiskUsageJob implements ShouldQueue
     public function handle(StorageAdapter $storage): void
     {
         $stats = $storage->diskStats($this->project->base_path);
+        $sharedSizes = $storage->sharedPathSizes($this->project->base_path, $this->project->shared_paths ?? []);
 
         $this->project->forceFill([
             'disk_usage' => $stats['current'],
             'releases_disk_usage' => $stats['releases'],
+            'shared_disk_usage' => $sharedSizes,
             'disk_usage_status' => 'idle',
             'disk_usage_calculated_at' => now(),
         ])->save();

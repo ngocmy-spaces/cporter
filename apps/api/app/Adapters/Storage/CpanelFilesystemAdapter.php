@@ -272,6 +272,41 @@ class CpanelFilesystemAdapter implements StorageAdapter
         return ['current' => $current, 'releases' => $releases];
     }
 
+    public function sharedPathSizes(string $projectBasePath, array $sharedPaths): array
+    {
+        $sharedDir = $this->jailedLeaf($this->trailingChild($projectBasePath, 'shared'));
+        if (! is_dir($sharedDir)) {
+            return [];
+        }
+
+        // Resolve each entry against a jail rooted at shared/ so a crafted `..` in a path can't
+        // escape and size arbitrary files — mirrors linkShared()'s resolution.
+        $shared = $this->jail->assertInside($sharedDir);
+        $sharedJail = new PathJail([$shared]);
+
+        $sizes = [];
+        foreach ($sharedPaths as $entry) {
+            [$rel, $type] = $this->sharedEntry($entry);
+            if ($rel === '') {
+                continue;
+            }
+
+            try {
+                $sharedPath = $sharedJail->assertInside($shared.'/'.$rel);
+            } catch (\Throwable) {
+                continue; // entry escapes the shared jail (or is malformed) — skip, don't size the wrong thing
+            }
+
+            if ($type === 'file') {
+                $sizes[$rel] = is_file($sharedPath) && ! is_link($sharedPath) ? (filesize($sharedPath) ?: 0) : 0;
+            } else {
+                $sizes[$rel] = is_dir($sharedPath) ? $this->dirBytes($sharedPath) : 0;
+            }
+        }
+
+        return $sizes;
+    }
+
     /** Recursively sum real file sizes under $dir, never following symlinks. */
     private function dirBytes(string $dir): int
     {

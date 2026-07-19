@@ -73,6 +73,8 @@ export interface Project {
   disk_usage_status: 'idle' | 'running';
   disk_usage_started_at: string | null;
   disk_usage_calculated_at: string | null;
+  /** Per-shared-path size in bytes, keyed by the entry's relative path; null until first computed. */
+  shared_disk_usage: Record<string, number> | null;
   health_check_url: string | null;
   shared_paths: SharedPath[];
   hooks: Record<string, unknown> | null;

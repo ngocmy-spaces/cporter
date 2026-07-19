@@ -694,12 +694,22 @@ export function ProjectDetailPage() {
       <Drawer opened={sharedOpened} onClose={closeShared} position="right" size="md" title="Shared paths">
         {p.shared_paths && p.shared_paths.length > 0 ? (
           <Stack gap="xs">
+            <Text size="xs" c="dimmed">
+              Sizes as of{' '}
+              {p.disk_usage_calculated_at ? formatRelativeTime(p.disk_usage_calculated_at) : 'never'} —
+              use Recalculate to refresh.
+            </Text>
             {p.shared_paths.map((sp, index) => (
               <Group key={`${sp.path}-${index}`} justify="space-between" wrap="nowrap">
                 <Code>{sp.path}</Code>
-                <Badge color={sp.type === 'dir' ? 'blue' : 'grape'} variant="light">
-                  {sp.type}
-                </Badge>
+                <Group gap="sm" wrap="nowrap">
+                  <Text size="sm" c="dimmed">
+                    {formatBytes(p.shared_disk_usage?.[sp.path])}
+                  </Text>
+                  <Badge color={sp.type === 'dir' ? 'blue' : 'grape'} variant="light">
+                    {sp.type}
+                  </Badge>
+                </Group>
               </Group>
             ))}
           </Stack>

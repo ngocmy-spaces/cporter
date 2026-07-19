@@ -19,6 +19,9 @@ class Project extends Model
     /** @use HasFactory<ProjectFactory> */
     use HasFactory, SoftDeletes;
 
+    /** Deploy stages the engine runs hooks for, in order (docs/SPEC.md §9). */
+    public const HOOK_STAGES = ['pre_activate', 'post_activate'];
+
     protected $fillable = [
         'name',
         'slug',
@@ -32,6 +35,7 @@ class Project extends Model
         'disk_usage_status',
         'disk_usage_started_at',
         'disk_usage_calculated_at',
+        'shared_disk_usage',
         'health_check_url',
         'shared_paths',
         'hooks',
@@ -55,12 +59,12 @@ class Project extends Model
         return [
             'type' => ProjectType::class,
             'status' => ProjectStatus::class,
-            'hooks' => 'array',
             'keep_releases' => 'integer',
             'disk_usage' => 'integer',
             'releases_disk_usage' => 'integer',
             'disk_usage_started_at' => 'datetime',
             'disk_usage_calculated_at' => 'datetime',
+            'shared_disk_usage' => 'array',
         ];
     }
 
@@ -103,6 +107,51 @@ class Project extends Model
             }
 
             $out[] = ['path' => $path, 'type' => $type];
+        }
+
+        return $out;
+    }
+
+    /**
+     * hooks is a JSON object of {stage: [command, …]} the deploy engine runs around activation
+     * (docs/SPEC.md §9). Only the known stages ({@see self::HOOK_STAGES}) are kept; each command
+     * is trimmed and blanks are dropped, so a UI can send padded/empty rows without persisting
+     * junk. Empty stages are omitted entirely, so `hooks` is `{}` when nothing is configured.
+     */
+    protected function hooks(): Attribute
+    {
+        return Attribute::make(
+            get: fn (?string $value): array => self::normalizeHooks(json_decode($value ?? '{}', true) ?: []),
+            // Cast to object so an empty map serializes as `{}`, not `[]`, while the inner
+            // command lists stay JSON arrays (JSON_FORCE_OBJECT would wrongly objectify those).
+            set: fn ($value): string => (string) json_encode((object) self::normalizeHooks($value)),
+        );
+    }
+
+    /**
+     * @param  mixed  $raw
+     * @return array<string, list<string>>
+     */
+    public static function normalizeHooks($raw): array
+    {
+        $out = [];
+
+        foreach (self::HOOK_STAGES as $stage) {
+            $commands = is_array($raw) ? ($raw[$stage] ?? []) : [];
+            if (! is_array($commands)) {
+                continue;
+            }
+
+            $clean = [];
+            foreach ($commands as $cmd) {
+                if (is_string($cmd) && trim($cmd) !== '') {
+                    $clean[] = trim($cmd);
+                }
+            }
+
+            if ($clean !== []) {
+                $out[$stage] = $clean;
+            }
         }
 
         return $out;

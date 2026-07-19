@@ -4,6 +4,7 @@ use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Audit\AuditLogger;
 use App\Domain\Storage\PathJail;
 use App\Jobs\PurgeProjectJob;
+use App\Jobs\RecomputeDiskUsageJob;
 use App\Models\Project;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -215,6 +216,27 @@ it('purges the entire base_path when the job runs with purge all', function () {
     expect(Project::withTrashed()->find($project->id)->trashed())->toBeTrue();
 });
 
+it('records per-shared-path sizes when disk usage is recomputed', function () {
+    $project = Project::factory()->create([
+        'slug' => 'shop',
+        'base_path' => $this->base,
+        'shared_paths' => [
+            ['path' => 'storage', 'type' => 'dir'],
+            ['path' => '.env', 'type' => 'file'],
+        ],
+    ]);
+    File::makeDirectory($this->base.'/shared/storage', 0777, true, true);
+    File::put($this->base.'/shared/storage/a.txt', str_repeat('a', 16));
+    File::put($this->base.'/shared/.env', 'SECRET');
+
+    (new RecomputeDiskUsageJob($project))->handle(app(StorageAdapter::class));
+
+    expect($project->fresh()->shared_disk_usage)->toEqual([
+        'storage' => 16,
+        '.env' => 6,
+    ]);
+});
+
 it('rejects an unknown purge level', function () {
     Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base]);
 
@@ -329,4 +351,53 @@ it('requires admin auth to run preflight', function () {
     Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base]);
 
     $this->postJson('/api/v1/projects/shop/preflight')->assertUnauthorized();
+});
+
+it('normalizes hooks on create: trims commands, drops blanks and empty stages', function () {
+    $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+        'name' => 'Hooked',
+        'base_path' => $this->base,
+        'type' => 'laravel',
+        'hooks' => [
+            'pre_activate' => ['  artisan migrate --force  ', '', '   '],
+            'post_activate' => [],
+        ],
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.hooks', ['pre_activate' => ['artisan migrate --force']]);
+});
+
+it('updates project hooks', function () {
+    Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base]);
+
+    $this->actingAs($this->admin)->patchJson('/api/v1/projects/shop', [
+        'hooks' => [
+            'pre_activate' => ['artisan migrate --force'],
+            'post_activate' => ['artisan queue:restart'],
+        ],
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.hooks.pre_activate.0', 'artisan migrate --force')
+        ->assertJsonPath('data.hooks.post_activate.0', 'artisan queue:restart');
+});
+
+it('rejects an unknown hook stage', function () {
+    $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+        'name' => 'Bad Hook',
+        'base_path' => $this->base,
+        'type' => 'laravel',
+        'hooks' => ['post_deploy' => ['artisan migrate']],
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('hooks');
+});
+
+it('rejects a non-string hook command', function () {
+    Project::factory()->create(['slug' => 'shop', 'base_path' => $this->base]);
+
+    $this->actingAs($this->admin)->patchJson('/api/v1/projects/shop', [
+        'hooks' => ['pre_activate' => [['not' => 'a string']]],
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('hooks');
 });

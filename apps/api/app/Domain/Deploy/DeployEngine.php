@@ -146,6 +146,7 @@ class DeployEngine
             $project->forceFill([
                 'disk_usage' => $stats['current'],
                 'releases_disk_usage' => $stats['releases'],
+                'shared_disk_usage' => $this->storage->sharedPathSizes($project->base_path, $project->shared_paths ?? []),
                 'disk_usage_calculated_at' => now(),
             ])->save();
             $deployment->forceFill(['status' => DeploymentStatus::Success, 'finished_at' => now()])->save();
