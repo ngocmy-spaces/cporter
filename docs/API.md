@@ -83,7 +83,7 @@ Poll status + step timeline of one deployment. Returns `{ "data": <Deployment> }
 Logs are delivered **inside `steps[]`** — there is no separate `/logs` endpoint (see §8).
 
 ### `POST /projects/{slug}/rollback`  — scope: `rollback`
-Roll the project back. Body: `{ "releaseId": <int> }` (optional — omit to roll back to the previous release).
+Roll the project back. Body: `{ "release_id": <int> }` (optional — omit to roll back to the previous release; the SDK/MCP option `releaseId` maps to this snake_case wire field).
 Returns `{ "data": <Deployment> }`.
 > Current behavior: **symlink swap only** (no post-activate hooks / no health-check re-run yet — tracked in the backlog, SPEC §20).
 

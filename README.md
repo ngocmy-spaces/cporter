@@ -108,6 +108,7 @@ deploys), `queue:work` (artifact extraction), and `cporter:housekeep` (timeout/l
 
 ## Documentation
 
+- 🌐 **Live docs:** [cporter.ngocmy.io.vn/docs](https://cporter.ngocmy.io.vn/docs/overview) — user guides (cPanel setup, CLI, GitHub Action, MCP, API) served by cPorter itself
 - 📄 [Technical specification (SPEC)](docs/SPEC.md) — architecture & rationale (§20 lists as-built deltas)
 - 🔌 [HTTP API contract (`/api/v1`)](docs/API.md) — authoritative interface every client encodes
 - 🚀 [Deploying cPorter to cPanel](docs/DEPLOYMENT-CPANEL.md)
