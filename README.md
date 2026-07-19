@@ -102,11 +102,15 @@ deploys), `queue:work` (artifact extraction), and `cporter:housekeep` (timeout/l
 
 ## Documentation
 
-- 📄 [Technical specification (SPEC)](docs/SPEC.md)
+- 📄 [Technical specification (SPEC)](docs/SPEC.md) — architecture & rationale (§20 lists as-built deltas)
+- 🔌 [HTTP API contract (`/api/v1`)](docs/API.md) — authoritative interface every client encodes
 - 🚀 [Deploying cPorter to cPanel](docs/DEPLOYMENT-CPANEL.md)
 - 📦 [Releasing & maintaining the npm packages + GitHub Action](docs/RELEASING.md)
 - ✅ [Task breakdown by phase](TASKS.md)
 
 ## Status
 
-Phase 0 + Phase 1 complete; Phase 2 (Laravel via cron-worker) in progress. See [TASKS.md](TASKS.md).
+Phases 0–3 complete (deploy + rollback for static/WordPress/PHP and Laravel via cron-worker, chunked
+upload, full admin panel, scheduler, audit log). Phase 4 ecosystem largely shipped: SDK, CLI, GitHub
+Action, MCP server, and cPorter self-deploy are live. Remaining: PHP SDK, plugin API, multi-account, plus
+the hardening backlog. See [TASKS.md](TASKS.md) and [SPEC §20](docs/SPEC.md#20-as-built-deltas--known-gaps).

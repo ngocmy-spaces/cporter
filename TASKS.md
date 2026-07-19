@@ -15,7 +15,7 @@ and **spec reference**. Legend: ✅ done · 🔜 next · ⬜ todo · 🔒 blocke
 | **T0.1** | Monorepo scaffold | ✅ | `apps/{api,web}`, pnpm workspace, `.gitignore/.editorconfig`, `build/build-artifact.mjs`, README | §4.2 |
 | **T0.2** | Web SPA shell | ✅ | React 19 + Vite + TS + **Mantine v9** + Router + React Query; AppShell layout + 8 stub pages; **build + lint pass**. FE docs/skill/agent: [docs/FRONTEND.md](docs/FRONTEND.md) | §13 |
 | **T0.3** | API Laravel 12 skeleton | ✅ | Laravel 12/PHP 8.2, Sanctum, `/api/v1/health`, `Adapters/{Storage,Command}` interfaces, `cporter:run-jobs` stub, `config/cporter.php`; **tests + migrate pass** | §15 |
-| **T0.4** | CI self-deploy workflow | ✅ | `.github/workflows/deploy.yml`: build web → composer install --no-dev → `pnpm build:artifact` → POST Deploy API (secrets CPORTER_URL/TOKEN/PROJECT, idempotency=SHA). `build-artifact.mjs` emits artifact/sha256/version via `$GITHUB_OUTPUT` | §14 |
+| **T0.4** | CI self-deploy workflow | ✅ | `.github/workflows/deploy.yml`: build web → composer install --no-dev → `pnpm build:artifact` → deploy via the **cPorter GitHub Action** (`packages/github-action@v1` → CLI), `project: cporter` inline, secrets `CPORTER_HOST`/`CPORTER_TOKEN`. `build-artifact.mjs` emits artifact/sha256/version via `$GITHUB_OUTPUT`. *(Originally a direct POST with `CPORTER_URL`; migrated to the Action once T4.1/T4.3 shipped.)* | §14 |
 | **T0.5** | Domain model + migrations | ✅ | 6 migrations + Eloquent models (`projects`/`releases`/`artifacts`/`deployments`/`api_keys`/`audit_logs`) + 6 backed enums in `app/Enums`; ProjectFactory. **migrate + 5 tests pass**. Models in `app/Models`, `app/Domain` reserved for the engine | §5 |
 | **T0.6** | Auth + API keys + capability probe | ✅ | Admin auth = same-origin session (web guard): `/auth/login\|logout\|user`. API key `cpk_…` (prefix + sha256 hash) via `ApiKeyService` + middleware `apikey`/`scope:` + scopes(`read/deploy/rollback/admin`, admin=super) + `/whoami` + admin CRUD `/api-keys`. `GET /system/capabilities` (probe ext/functions/symlink/disk/limits). **16 tests pass** | §9.3, §12 |
 | **T0.7** | Settings + jail config | ✅ | `PathJail` (normalize + realpath symlink-resolve, guards against traversal/symlink-escape/prefix-confusion, deny-all by default) bound as singleton; `Setting` model + table (stores probe); `/system/capabilities` persist + `/refresh`; boot-validate base paths. **27 tests pass** | §11, §12 |
@@ -71,14 +71,32 @@ and **spec reference**. Legend: ✅ done · 🔜 next · ⬜ todo · 🔒 blocke
 
 ---
 
-## Phase 4 — Ecosystem (future)
+## Phase 4 — Ecosystem
 
-| ID | Task | Deliverable | Spec |
-|----|------|---|---|
-| **T4.1** | Official GitHub Action | Action published to the marketplace | §18 |
-| **T4.2** | JS SDK + PHP SDK | Client libraries calling the Deploy API | §18 |
-| **T4.3** | CLI | `cporter deploy …` | §18 |
-| **T4.4** | Plugin/Adapter API · multi-account · self-deploy | SshStorageAdapter, multi-server, cPorter self-update | §14, §18 |
+| ID | Task | Status | Deliverable | Spec |
+|----|------|:----:|---|---|
+| **T4.1** | GitHub Action | ✅ | `packages/github-action` composite action → CLI; floating tag `@v1`; referenced by monorepo subpath. *(Marketplace listing not done — requires root `action.yml`; see RELEASING.md.)* | §18 |
+| **T4.2** | JS SDK | ✅ | `@cporter/sdk` — TS client core (deploy/chunked/rollback/whoami/wait); published to npm. **PHP SDK: ⬜ not started.** | §18 |
+| **T4.3** | CLI | ✅ | `@cporter/cli` — `deploy`/`status`/`rollback`/`whoami`, env + flags, exit-code contract; published to npm | §18 |
+| **T4.4** | MCP server | ✅ | `@cporter/mcp` — 4 tools (`cporter_deploy/status/rollback/whoami`) over stdio, wraps the SDK. *(Not in the original design; added in practice.)* README + [SPEC §18]. **⚠️ not yet in `publish.yml`** — see T5.6 | §18 |
+| **T4.5** | Self-deploy | ✅ | `deploy.yml` self-deploys `project: cporter` on push to `main` via the Action | §14 |
+| **T4.6** | Plugin/Adapter API · multi-account | ⬜ | SshStorageAdapter, multi-server/multi-account | §14, §18 |
+
+---
+
+## Phase 5 — Hardening & known gaps (backlog)
+
+> Sourced from the 2026-07-19 spec↔impl reconciliation ([SPEC §20](docs/SPEC.md#20-as-built-deltas--known-gaps)).
+> These are real behavioural/contract gaps deferred by decision ("docs first, code later"). Ordered by priority.
+
+| ID | Task | Priority | Deliverable / Notes | Spec |
+|----|------|:----:|---|---|
+| **T5.1** | Rollback: run hooks + health-check | 🔴 High | Rollback currently does symlink-swap only. Add post-activate hooks (cache clear) + a health-check after swap; on unhealthy target, surface it (don't silently leave a bad release live). | §8, §20.3 |
+| **T5.2** | Concurrent deploy → `409` | 🟡 Med | Detect an existing deploy lock **at request time** and return `409 Conflict` synchronously, instead of failing the loser asynchronously. | §6, §20.2 |
+| **T5.3** | Strengthen pipeline "Validate" (step 9) | 🟡 Med | Verify `public/index.php` (Laravel) / `index.html` (static) exist, not just that the docroot is a directory. | §6, §20.2 |
+| **T5.4** | CI read-scope for projects/releases | 🟢 Low | Decide: expose `GET /projects` + `/projects/{slug}/releases` to read-scope API keys, or formally drop them from the CI contract (currently admin-session only). | §7, §20.1 |
+| **T5.5** | Deployment logs endpoint | 🟢 Low | Either implement `GET /deployments/{id}/logs` or keep logs in `steps[]` and remove the endpoint from the contract permanently (already removed from API.md). | §7, §20.1 |
+| **T5.6** | Publish `@cporter/mcp` | 🟢 Low | Decide whether to publish MCP to npm; if yes, add it to `publish.yml` (after SDK) + RELEASING.md "What ships". | §18, §20.6 |
 
 ---
 

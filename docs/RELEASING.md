@@ -7,8 +7,9 @@ is the operational runbook — keep it in sync when the process changes.
 
 | Artifact | Registry / location | Consumed as |
 | --- | --- | --- |
-| `@cporter/sdk` | npm (public, scope `@cporter`) | dependency of the CLI |
+| `@cporter/sdk` | npm (public, scope `@cporter`) | dependency of the CLI + MCP |
 | `@cporter/cli` | npm (public) | `npx @cporter/cli deploy …` in any CI/shell |
+| `@cporter/mcp` | ⚠️ **built, not yet published** — see below | `npx -y @cporter/mcp` as an MCP server |
 | **Deploy Action** | this monorepo, `packages/github-action/` | `uses: ngocmy-spaces/cporter/packages/github-action@v1` |
 
 The GitHub Action is a **thin composite wrapper** — it runs `npx @cporter/cli deploy`. It
@@ -61,6 +62,19 @@ the SDK version changes, re-publish the CLI too** so it points at the new SDK.
 
 **Dry run first (recommended):** run the workflow manually with `dry_run: true` — it builds and
 `pnpm pack`s both packages without publishing, so you can inspect the tarball contents.
+
+### `@cporter/mcp` — publishing (not yet wired)
+
+`publish.yml` currently ships **only** `@cporter/sdk` and `@cporter/cli`. `@cporter/mcp` is built by
+`pnpm build:packages` and documented ([packages/mcp/README.md](../packages/mcp/README.md)), but it is
+**not in the publish matrix**, so `npx -y @cporter/mcp` does not resolve from npm yet.
+
+To publish it (decision + one-time change — tracked in TASKS.md Phase 5):
+1. Ensure `packages/mcp/package.json` has `publishConfig.access = public` and a correct `@cporter/sdk`
+   dependency (`workspace:*`, rewritten to a pinned version on publish — same rule as the CLI).
+2. Add an `@cporter/mcp` step to `publish.yml` **after** the SDK step (it depends on the SDK, like the CLI).
+3. Bump its `version`, then release under the same `pkg-v*` tag flow above. Because MCP pins the SDK
+   version, **re-publish MCP whenever the SDK version changes** (same constraint as the CLI).
 
 ---
 

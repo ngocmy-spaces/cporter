@@ -15,15 +15,27 @@ apps/web/
 │   ├── main.tsx              # import styles.css → ColorSchemeScript + MantineProvider + QueryClient + Router
 │   ├── theme.ts              # createTheme (primaryColor indigo, radius, font)
 │   ├── index.css             # only small globals (Mantine styles.css handles the reset)
-│   ├── App.tsx               # routes
+│   ├── App.tsx               # routes (admin app + public /docs area)
 │   ├── components/
-│   │   ├── Layout.tsx        # AppShell (header + navbar + color-scheme toggle)
-│   │   └── Placeholder.tsx
-│   ├── pages/                # Dashboard + 7 pages (Projects, Deployments, …)
+│   │   ├── Layout.tsx            # AppShell (header + navbar)
+│   │   ├── ColorSchemeToggle.tsx # dark/light toggle
+│   │   ├── DeploymentDrawer.tsx  # step timeline + poll to terminal status
+│   │   ├── StatusBadge.tsx
+│   │   ├── Placeholder.tsx
+│   │   └── docs/CodeBlock.tsx     # used by the /docs pages
+│   ├── pages/                # admin: Dashboard, Projects, ProjectDetail, Deployments,
+│   │   │                     #        Releases, Logs, Settings, Users, ApiKeys, Login
+│   │   └── docs/             # public docs: Overview, Quickstart, GithubAction, Mcp, ApiReference
 │   └── lib/
 │       ├── api.ts            # axios client, base /api/v1, bearer token
+│       ├── auth.tsx          # session auth context (login/logout/user)
+│       ├── format.ts         # formatting helpers
+│       ├── types.ts          # shared FE types
 │       └── queryClient.ts
 ```
+
+> Mantine sub-packages in use (import each one's `styles.css` **after** `@mantine/core`):
+> `@mantine/form`, `@mantine/modals`, `@mantine/notifications`.
 
 ## Mantine setup (already configured)
 

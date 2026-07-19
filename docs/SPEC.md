@@ -1,9 +1,13 @@
 # cPorter — Technical Specification
 
-> Status: **DRAFT v0.1** · Date: 2026-07-17
+> Status: **as-built v1.0** · Design date: 2026-07-17 · Reconciled with implementation: 2026-07-19
 >
-> This document describes the architecture, scope, and technical decisions of cPorter.
-> Items marked **[ASSUMPTION]** must be confirmed before finalization (see §17 Open Questions).
+> This document describes the architecture, scope, and technical decisions of cPorter. It began as a
+> pre-code design draft; it has now been reconciled against the shipped code (Phases 0–3 complete,
+> Phase 4 ecosystem largely shipped). **Where the implementation diverged from the original design, the
+> deltas are consolidated in [§20 As-built deltas & known gaps](#20-as-built-deltas--known-gaps)** — read
+> that section alongside any design section below. For the exact HTTP interface, [docs/API.md](API.md) is
+> the authoritative contract; this document is the *design/rationale*.
 
 ---
 
@@ -185,9 +189,14 @@ cporter/
 │       ├── src/
 │       ├── index.html
 │       └── package.json
+├── packages/                # ecosystem clients (shipped — see §18, docs/RELEASING.md)
+│   ├── sdk/                 # @cporter/sdk — TypeScript client core (the contract lives here)
+│   ├── cli/                 # @cporter/cli — command-line client (wraps the SDK)
+│   ├── mcp/                 # @cporter/mcp — MCP server for AI agents (wraps the SDK)
+│   └── github-action/       # composite GitHub Action (wraps the CLI)
 ├── build/                   # script that combines the build → a single deployable .zip artifact
 │   └── build-artifact.mjs
-├── .github/workflows/       # sample CI to self-deploy cPorter
+├── .github/workflows/       # deploy.yml (self-deploy via the Action) + publish.yml (npm release)
 ├── package.json             # root: pnpm workspace, orchestrates FE+BE build
 ├── pnpm-workspace.yaml
 └── README.md
@@ -253,6 +262,12 @@ auto-rollback if already activated, and always `finally { unlock }`.
 ---
 
 ## 7. Deploy API (proposed endpoints)
+
+> **As-built:** the authoritative, current contract is **[docs/API.md](API.md)** — including the two auth
+> surfaces (API key vs admin session), the real **project-nested** chunked-upload paths, and known gaps
+> (`/deployments/{id}/logs` not implemented — logs live in `steps[]`; `GET /projects` + `/releases` are
+> admin-session only; no `Location` header; `meta` not emitted). The table below is the original design
+> sketch; where it disagrees with API.md, API.md wins. See §20.
 
 Base: `https://deploy.domain/api/v1` · Auth: `Authorization: Bearer <token>`
 
@@ -497,24 +512,29 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 
 ## 18. Phased Roadmap
 
-**Phase 0 — Foundation**
+**Phase 0 — Foundation** — ✅ **done**
 - Scaffold the monorepo (Laravel + React + build script + sample CI).
 - Domain model + migrations. Auth (Sanctum) + API key. Capability probe.
 
-**Phase 1 — MVP Deploy (static/SPA first)**
+**Phase 1 — MVP Deploy (static/SPA first)** — ✅ **done**
 - Storage Abstraction + cPanel FS Adapter (symlink, extract, prune, lock).
 - Full pipeline for `type: static`: upload → verify → extract → activate → health check → prune.
 - Rollback (symlink). Admin: basic Projects, Deployments, Releases, Logs.
 
-**Phase 2 — Laravel target + Hooks**
-- Command Runner (exec/ssh/manual) + hooks (migrate/cache/queue).
+**Phase 2 — Laravel target + Hooks** — ✅ **done**
+- Command Runner (proc_open via cron-worker) + hooks (migrate/cache/queue).
 - Chunked upload. Idempotency. Auto-rollback.
 
-**Phase 3 — Complete Admin & Scheduler**
+**Phase 3 — Complete Admin & Scheduler** — ✅ **done**
 - Dashboard, Users, Tokens UI. Cron scheduler (queue worker, prune, timeout). Audit log UI.
 
-**Phase 4 — Ecosystem (future)**
-- Official GitHub Action, JS SDK, PHP SDK, CLI, Plugin/Adapter API, multi-server/multi-account.
+**Phase 4 — Ecosystem** — 🟡 **largely shipped**
+- ✅ **Shipped:** JS SDK (`@cporter/sdk`), CLI (`@cporter/cli`), GitHub Action
+  (`packages/github-action`, floating tag `@v1`), **MCP server** (`@cporter/mcp` — not in the original
+  design, added in practice), and **cPorter self-deploy** (`deploy.yml` deploys `project: cporter` on
+  push to `main`). Release process: [docs/RELEASING.md](RELEASING.md).
+- ⬜ **Not yet built:** PHP SDK, Plugin/Adapter API, multi-server / multi-account.
+- ⚠️ **`@cporter/mcp` is not yet in the npm publish pipeline** (`publish.yml` ships sdk + cli only) — see §20.
 
 ---
 
@@ -528,4 +548,60 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 | Symlink not allowed/not followed at the docroot | Medium→Low | Probe at setup; fall back to copy-swap if the host forbids symlinks |
 | Concurrent deploy / stuck lock | Medium | Atomic O_EXCL lock + TTL, cron cleans up expired locks |
 | Rollback corrupts data due to migration | High | Rollback is code-only by default, with a clear warning (§8) |
-```
+
+---
+
+## 20. As-built deltas & known gaps
+
+> Consolidated on 2026-07-19 by reconciling this spec against the shipped code. This is the **single place**
+> to look for "where does reality differ from the design above". Two kinds of entry:
+> **(D) Documented delta** — code intentionally diverged; the spec section above is now updated/annotated.
+> **(B) Backlog** — a real gap worth fixing; tracked in [TASKS.md](../TASKS.md) "Phase 5 — Hardening".
+> When a (B) item is fixed, delete its row here and drop the ⚠️ note in the referenced section / API.md.
+
+### 20.1 API surface (§7 / API.md)
+| Kind | Item | Reality |
+|---|---|---|
+| D | Chunked-upload paths | Project-nested: `POST/PUT …/projects/{slug}/artifacts/uploads/…`, not the top-level shape sketched in §7. API.md is authoritative. |
+| D | Envelope | Success `{data}`, error `{error}`. `meta` is reserved, **not emitted**. |
+| B | `GET /projects` & `GET /projects/{slug}/releases` | Listed in §7 as CI read-scope, but implemented **admin-session-only** → CI read-scope tokens can't call them. Decide: expose to read-scope keys, or drop from the CI contract. |
+| B | `GET /projects/{slug}/deployments/{id}/logs` | In §7, **not implemented**. Logs are returned inside the deployment `steps[]`; either build the endpoint or remove it from the contract (currently removed from API.md). |
+| B | `202` has no `Location` header | §7/§6 promise `Location`; not set. Poll via the id in the body. |
+
+### 20.2 Deploy pipeline & concurrency (§6)
+| Kind | Item | Reality |
+|---|---|---|
+| B | Lock ordering / no `409` | Upload + sha256 verify happen in the web request **before** the deploy lock (lock is acquired inside the async job). Concurrent deploys → the loser **fails asynchronously**, not a synchronous `409 Conflict`. |
+| B | Step 9 "Validate" is weak | Only checks the docroot subpath is a directory; does **not** verify `public/index.php` / `index.html` exist as §6 step 9 states. |
+| D | Steps 5–6 placement | Hash verify + release-dir creation happen in the controller / folded into extract, not as discrete recorded `steps[]` entries. Functionally equivalent. |
+
+### 20.3 Rollback engine (§8)
+| Kind | Item | Reality |
+|---|---|---|
+| B | Rollback runs **only** the symlink swap | It **skips post-activate hooks (cache clear) and the health-check re-run** that §8 specifies. Risk: rolling back to a release that is itself unhealthy goes unnoticed, and Laravel caches aren't refreshed. **Highest-value backlog item.** |
+| D | Symlink-forbidden fallback | Implemented as **copy-swap** (copy release into `current`, keep `releases/<id>` immutable), not the rename-swap described in §8. Behaviour is equivalent and safe. |
+
+### 20.4 Command execution (§9)
+| Kind | Item | Reality |
+|---|---|---|
+| D | No shell-jobs table | Hooks for Laravel run **inline via `proc_open`** inside the cron `run-jobs` finalize step, not as individually enqueued shell-command jobs. Simpler; works because CLI/cron PHP allows `proc_open`. |
+| D | Driver matrix collapsed | Only `ProcessCommandRunner` (proc_open) is wired. `manual` = "shell unavailable" message. `command_driver` config is **informational only**; **no SSH driver**. |
+| D | No `/cron/tick` HTTP endpoint (§10) | One cPanel cron runs `php artisan schedule:run` (shell context), which drives `cporter:run-jobs` + `queue:work` + `cporter:housekeep`. The `cron_token` config is currently **unused**. (Arguably better — shell context isn't blocked by `disable_functions`.) |
+
+### 20.5 Domain model (§5)
+| Kind | Item | Reality |
+|---|---|---|
+| D | Enums grew | `Deployment.status` adds `hooks_pending`; `Deployment.trigger` adds `webhook`; `Project.type` adds `wordpress`. |
+| D | Persisted fields | `Deployment.idempotency_key` is a real column with a unique `(project_id, idempotency_key)` index; a `settings` key/value table exists (probe/config). |
+| D | `Release`→`Artifact` | `artifact_id` is **nullable** (effectively `*—1 optional`, not strict `1—1`). |
+
+### 20.6 Ecosystem / release (§18)
+| Kind | Item | Reality |
+|---|---|---|
+| B | `@cporter/mcp` not published | Shipped as a package with a README + a `/docs` page, but **not in `publish.yml`** (which releases sdk + cli only). Decide whether to publish it to npm; if yes, add it to the publish matrix + RELEASING.md "What ships". |
+
+### 20.7 Reality exceeds the spec (no action — worth noting)
+- Uncompressed-size **zip-bomb guard** on extract (beyond §6's inode/size cap).
+- Deploy lock has a **TTL steal** for stale locks.
+- **Idempotency** is fully implemented (§6/§7 only mentioned the header).
+- Path jail is thorough (lexical normalize + `realpath` ancestor resolution + null-byte reject).

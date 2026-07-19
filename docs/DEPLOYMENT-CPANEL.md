@@ -155,10 +155,11 @@ For each site cPorter will deploy, set that domain's **Document Root**:
    - `health_check_url=https://<site>.domain/up` (Laravel has `/up`; static: any 200 URL)
 2. **API Keys ▸ New key** (scope `deploy`, `read`, optionally `rollback`) → copy the token.
 3. Deploy from CI or Postman:
-   - **GitHub Actions**: copy `.github/workflows/deploy.yml`, set repo secrets
-     `CPORTER_URL=https://deploy.domain`, `CPORTER_TOKEN=<key>`, `CPORTER_PROJECT=<slug>`.
+   - **GitHub Actions**: use the cPorter Action (`uses: ngocmy-spaces/cporter/packages/github-action@v1`),
+     set repo secrets `CPORTER_HOST=https://deploy.domain` + `CPORTER_TOKEN=<key>`, and pass the project
+     as the `project:` input (slug). See [docs/RELEASING.md](RELEASING.md#consuming-from-another-repo).
    - **Manual/Postman**: `POST https://deploy.domain/api/v1/projects/<slug>/deployments`
-     with `Authorization: Bearer <key>` + multipart `artifact` (.zip) + `sha256`.
+     with `Authorization: Bearer <key>` + multipart `artifact` (.zip) + `sha256`. Full contract: [docs/API.md](API.md).
 
 Laravel deploys return `202 hooks_pending`; the cron finalizes (migrate → activate → health)
 within ~1 minute. Static deploys finish immediately.
