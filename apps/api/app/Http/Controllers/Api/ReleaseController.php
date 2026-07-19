@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Domain\Audit\AuditLogger;
 use App\Domain\Deploy\DeployException;
 use App\Domain\Deploy\RollbackEngine;
 use App\Enums\DeploymentTrigger;
@@ -41,7 +42,7 @@ class ReleaseController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
-        app(\App\Domain\Audit\AuditLogger::class)->record(
+        app(AuditLogger::class)->record(
             'release.activated',
             $release,
             ['project' => $project->slug, 'version' => $release->version],

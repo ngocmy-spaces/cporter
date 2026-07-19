@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Domain\Audit\AuditLogger;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,7 +29,7 @@ class AuthController extends Controller
 
         $request->session()->regenerate();
 
-        app(\App\Domain\Audit\AuditLogger::class)->record('auth.login', Auth::user(), [], Auth::user()?->email);
+        app(AuditLogger::class)->record('auth.login', Auth::user(), [], Auth::user()?->email);
 
         return response()->json(['data' => Auth::user()]);
     }

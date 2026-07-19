@@ -6,6 +6,7 @@ use App\Adapters\Command\CommandRunner;
 use App\Adapters\Storage\StorageAdapter;
 use App\Enums\DeploymentStatus;
 use App\Enums\ReleaseState;
+use App\Models\Artifact;
 use App\Models\Deployment;
 use App\Models\Project;
 use App\Models\Release;
@@ -239,7 +240,7 @@ class DeployEngine
     }
 
     /**
-     * @return array{0: Project, 1: Release, 2: \App\Models\Artifact}
+     * @return array{0: Project, 1: Release, 2: Artifact}
      */
     private function resolve(Deployment $deployment): array
     {

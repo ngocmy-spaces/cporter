@@ -216,7 +216,7 @@ DB: cPanel's MySQL (or SQLite for a small deployment — **[ASSUMPTION B]** use 
 |---|---|---|
 | **User** | id, name, email, password, role | Admin panel login. |
 | **ApiKey / Token** | id, name, prefix, hash, scopes[], project_id?, last_used_at, expires_at, revoked_at | Token for CI. Stores the **hash** (Sanctum-style), shows plaintext once. Scopes: `deploy`, `read`, `rollback`, `admin`. |
-| **Project** | id, name, slug, base_path, type(`laravel`\|`static`\|`php`\|`node`), docroot_subpath, php_binary, keep_releases, health_check_url, hooks(json), shared_paths(json), status | Configuration for one managed domain. |
+| **Project** | id, name, slug, base_path, type(`laravel`\|`static`\|`php`\|`node`\|`wordpress`), docroot_subpath, php_binary, keep_releases, health_check_url, hooks(json), shared_paths(json), status(`active`\|`disabled`\|`deleting`), deleted_at | Configuration for one managed domain. Soft-deleted (`deleted_at`); a `disabled` or `deleting` project rejects new deploys. |
 | **Release** | id, project_id, ref/version, artifact_id, path, state(`pending`\|`extracting`\|`ready`\|`active`\|`superseded`\|`failed`), created_by, activated_at | One physical release. |
 | **Artifact** | id, project_id, filename, size, sha256, storage_path, uploaded_at, status | The build file from CI. |
 | **Deployment** | id, project_id, release_id, trigger(`api`\|`manual`\|`cron`), status(`queued`→`running`→`success`\|`failed`\|`rolled_back`), steps(json), started_at, finished_at, actor | One pipeline run. |
@@ -576,7 +576,8 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 | Kind | Item | Reality |
 |---|---|---|
 | D | Chunked-upload paths | Project-nested: `POST/PUT …/projects/{slug}/artifacts/uploads/…`, not the top-level shape sketched in §7. API.md is authoritative. |
-| D | Envelope | Success `{data}`, error `{error}`. `meta` is reserved, **not emitted**. |
+| D | Envelope | Success `{data}`, error `{error}`. `meta` is emitted **only** by paginated `GET /projects` (`{data, meta:{current_page,last_page,per_page,total}}`); elsewhere it is absent. |
+| D | Project management endpoints | Beyond create/read, the admin surface ships `PATCH /projects/{slug}` (partial update; `status` toggles enable/disable; `slug`/`base_path`/`type` frozen once releases exist) and `DELETE /projects/{slug}` (soft-delete + optional async disk purge `none`\|`releases`\|`all`). `GET /projects` supports `?search`, `?status`, and opt-in `?page`/`?per_page`. Full contract in API.md. |
 | B | `GET /projects` & `GET /projects/{slug}/releases` | Listed in §7 as CI read-scope, but implemented **admin-session-only** → CI read-scope tokens can't call them. Decide: expose to read-scope keys, or drop from the CI contract. |
 | B | `GET /projects/{slug}/deployments/{id}/logs` | In §7, **not implemented**. Logs are returned inside the deployment `steps[]`; either build the endpoint or remove it from the contract (currently removed from API.md). |
 | B | `202` has no `Location` header | §7/§6 promise `Location`; not set. Poll via the id in the body. |
@@ -604,8 +605,8 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 ### 20.5 Domain model (§5)
 | Kind | Item | Reality |
 |---|---|---|
-| D | Enums grew | `Deployment.status` adds `hooks_pending`; `Deployment.trigger` adds `webhook`; `Project.type` adds `wordpress`. |
-| D | Persisted fields | `Deployment.idempotency_key` is a real column with a unique `(project_id, idempotency_key)` index; a `settings` key/value table exists (probe/config). |
+| D | Enums grew | `Deployment.status` adds `hooks_pending`; `Deployment.trigger` adds `webhook`; `Project.type` adds `wordpress`; `Project.status` adds `deleting` (transient: a disk purge is running; the row is soft-deleted once it finishes). |
+| D | Persisted fields | `Deployment.idempotency_key` is a real column with a unique `(project_id, idempotency_key)` index; a `settings` key/value table exists (probe/config). `Project` is **soft-deleted** (`deleted_at`) — a delete keeps deploy/audit history; disk reclamation is a separate opt-in (`PurgeProjectJob`). |
 | D | `Release`→`Artifact` | `artifact_id` is **nullable** (effectively `*—1 optional`, not strict `1—1`). |
 
 ### 20.6 Ecosystem / release (§18)

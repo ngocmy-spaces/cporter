@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Domain\Audit\AuditLogger;
 use App\Domain\Deploy\DeployException;
 use App\Domain\Deploy\RollbackEngine;
 use App\Enums\DeploymentTrigger;
@@ -44,7 +45,7 @@ class RollbackController extends Controller
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
-        app(\App\Domain\Audit\AuditLogger::class)->record(
+        app(AuditLogger::class)->record(
             'deployment.rolled_back',
             $deployment,
             ['project' => $project->slug, 'release_id' => $deployment->release_id],

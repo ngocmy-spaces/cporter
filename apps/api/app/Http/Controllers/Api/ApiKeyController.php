@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Domain\Audit\AuditLogger;
 use App\Domain\Auth\ApiKeyService;
 use App\Enums\ApiScope;
 use App\Http\Controllers\Controller;
@@ -40,7 +41,7 @@ class ApiKeyController extends Controller
             isset($data['expires_at']) ? new \DateTimeImmutable($data['expires_at']) : null,
         );
 
-        app(\App\Domain\Audit\AuditLogger::class)->record('apikey.created', $result['api_key'], [
+        app(AuditLogger::class)->record('apikey.created', $result['api_key'], [
             'name' => $result['api_key']->name,
             'scopes' => $result['api_key']->scopes,
         ]);
@@ -55,7 +56,7 @@ class ApiKeyController extends Controller
     {
         $apiKey->forceFill(['revoked_at' => now()])->save();
 
-        app(\App\Domain\Audit\AuditLogger::class)->record('apikey.revoked', $apiKey, ['name' => $apiKey->name]);
+        app(AuditLogger::class)->record('apikey.revoked', $apiKey, ['name' => $apiKey->name]);
 
         return response()->json(['data' => true]);
     }
