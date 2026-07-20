@@ -1,13 +1,15 @@
 import type { ComponentType } from 'react';
-import { ActionIcon, AppShell, Badge, Burger, Group, NavLink, Text, Tooltip } from '@mantine/core';
+import { ActionIcon, AppShell, Badge, Burger, Group, Menu, NavLink, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import {
   IconBook,
+  IconChevronDown,
   IconFileText,
   IconFolders,
   IconKey,
   IconLayoutDashboard,
+  IconLock,
   IconLogout,
   IconRocket,
   IconServer,
@@ -15,6 +17,7 @@ import {
 } from '@tabler/icons-react';
 import { useAuth } from '@/lib/auth';
 import { ColorSchemeToggle } from '@/components/ColorSchemeToggle';
+import { ChangePasswordModal } from '@/components/ChangePasswordModal';
 
 type NavItem = {
   to: string;
@@ -41,25 +44,39 @@ const ADMIN_NAV: NavItem[] = [
 
 function UserMenu() {
   const { user, logout } = useAuth();
+  const [passwordOpened, { open: openPassword, close: closePassword }] = useDisclosure(false);
   if (!user) return null;
 
   return (
-    <Group gap={6}>
-      <Text size="sm" c="dimmed">
-        {user.email}
-      </Text>
-      <Tooltip label="Log out">
-        <ActionIcon
-          variant="subtle"
-          color="gray"
-          size="lg"
-          aria-label="Log out"
-          onClick={() => void logout()}
-        >
-          <IconLogout size={18} stroke={1.5} />
-        </ActionIcon>
-      </Tooltip>
-    </Group>
+    <>
+      <Menu position="bottom-end" width={200} withArrow>
+        <Menu.Target>
+          <UnstyledButton aria-label="Account menu">
+            <Group gap={6}>
+              <Text size="sm" c="dimmed">
+                {user.email}
+              </Text>
+              <IconChevronDown size={16} stroke={1.5} />
+            </Group>
+          </UnstyledButton>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Item leftSection={<IconLock size={16} stroke={1.5} />} onClick={openPassword}>
+            Change password
+          </Menu.Item>
+          <Menu.Divider />
+          <Menu.Item
+            color="red"
+            leftSection={<IconLogout size={16} stroke={1.5} />}
+            onClick={() => void logout()}
+          >
+            Log out
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+
+      <ChangePasswordModal opened={passwordOpened} onClose={closePassword} />
+    </>
   );
 }
 

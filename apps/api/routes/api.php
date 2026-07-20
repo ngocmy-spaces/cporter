@@ -37,6 +37,7 @@ Route::prefix('v1')->group(function () {
         Route::middleware('auth')->group(function () {
             Route::post('/auth/logout', [AuthController::class, 'logout']);
             Route::get('/auth/user', [AuthController::class, 'user']);
+            Route::put('/auth/password', [AuthController::class, 'changePassword']);
 
             // ── Reads (admin + viewer) ──
             Route::get('/system/capabilities', [SystemController::class, 'capabilities']);

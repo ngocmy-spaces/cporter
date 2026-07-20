@@ -7,6 +7,8 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -46,5 +48,42 @@ class AuthController extends Controller
     public function user(Request $request): JsonResponse
     {
         return response()->json(['data' => $request->user()]);
+    }
+
+    /**
+     * Change the signed-in user's own password. Available to any authenticated
+     * role — a user manages their own credential, no admin rights needed.
+     */
+    public function changePassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'current_password' => ['required', 'string'],
+            'password' => ['required', 'string', 'confirmed', Password::min(8), 'different:current_password'],
+            'logout_other_devices' => ['sometimes', 'boolean'],
+        ]);
+
+        $user = $request->user();
+
+        if (! Hash::check($data['current_password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => __('The current password is incorrect.'),
+            ]);
+        }
+
+        $user->forceFill(['password' => Hash::make($data['password'])])->save();
+
+        // Optional, user's choice: sign out this account's OTHER active sessions. This keeps
+        // the current session valid and rehashes its stored password hash so it survives.
+        $logoutOthers = $request->boolean('logout_other_devices');
+        if ($logoutOthers) {
+            Auth::logoutOtherDevices($data['password']);
+        }
+        $request->session()->regenerate();
+
+        app(AuditLogger::class)->record('auth.password_changed', $user, [
+            'logout_other_devices' => $logoutOthers,
+        ], $user->email);
+
+        return response()->json(['data' => true]);
     }
 }

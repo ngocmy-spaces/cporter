@@ -22,6 +22,13 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => \App\Http\Middleware\EnsureRole::class,
         ]);
 
+        // Track the auth password hash in the session so a user can invalidate their OTHER
+        // sessions on password change (Auth::logoutOtherDevices — see AuthController). Any
+        // session whose stored hash no longer matches is logged out on its next request.
+        $middleware->web(append: [
+            \Illuminate\Session\Middleware\AuthenticateSession::class,
+        ]);
+
         // API-only app: never redirect guests to a (non-existent) `login` route.
         $middleware->redirectGuestsTo(fn () => null);
     })
