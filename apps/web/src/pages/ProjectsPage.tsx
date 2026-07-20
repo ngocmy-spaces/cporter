@@ -290,9 +290,8 @@ export function ProjectsPage() {
                 <Table.Tr>
                   <Table.Th>Name</Table.Th>
                   <Table.Th>Type</Table.Th>
-                  <Table.Th>Base path</Table.Th>
                   <Table.Th>Live size</Table.Th>
-                  <Table.Th>Releases</Table.Th>
+                  <Table.Th>Releases stored</Table.Th>
                   <Table.Th>Last deploy</Table.Th>
                   <Table.Th>Status</Table.Th>
                 </Table.Tr>
@@ -309,14 +308,12 @@ export function ProjectsPage() {
                         <Text size="xs" c="dimmed">
                           {p.slug}
                         </Text>
+                        <Text size="xs" c="dimmed">
+                          {p.base_path}
+                        </Text>
                       </Table.Td>
                       <Table.Td>
                         <Badge variant="light">{p.type}</Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="sm" c="dimmed">
-                          {p.base_path}
-                        </Text>
                       </Table.Td>
                       <Table.Td>
                         <Text size="sm">{formatBytes(p.disk_usage)}</Text>

@@ -857,11 +857,6 @@ export function ProjectDetailPage() {
                             <Text size="sm" fw={r.state === 'active' ? 600 : 400}>
                               <ReleaseVersion version={r.version} />
                             </Text>
-                            {r.state === 'active' && (
-                              <Badge size="xs" color="green" variant="filled">
-                                live
-                              </Badge>
-                            )}
                           </Group>
                         </Table.Td>
                         <Table.Td>
@@ -869,11 +864,11 @@ export function ProjectDetailPage() {
                         </Table.Td>
                         <Table.Td>{formatBytes(r.artifact?.size)}</Table.Td>
                         <Table.Td>{formatDateTime(r.activated_at)}</Table.Td>
-                        <Table.Td>
+                        <Table.Td align="center">
                           {r.state === 'active' ? (
-                            <Text size="xs" c="dimmed">
-                              current
-                            </Text>
+                            <Badge size="xs" color="green" variant="filled">
+                              live
+                            </Badge>
                           ) : (
                             isAdmin && (
                               <Button size="xs" variant="light" onClick={() => confirmActivate(r)}>
