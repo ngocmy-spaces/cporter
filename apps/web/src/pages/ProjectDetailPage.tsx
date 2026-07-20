@@ -30,7 +30,7 @@ import {
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { useForm } from '@mantine/form';
-import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import {
@@ -51,6 +51,9 @@ import {
 import axios from 'axios';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { PanelBody } from '@/components/PanelBody';
+import { EmptyState } from '@/components/EmptyState';
+import { notifyError, applyFormErrors } from '@/lib/feedback';
 import { DeploymentDrawer } from '@/components/DeploymentDrawer';
 import { ProjectEnvPanel } from '@/components/ProjectEnvPanel';
 import { DeploymentStatusBadge, ReleaseStateBadge } from '@/components/StatusBadge';
@@ -134,47 +137,6 @@ function summarizeActivityMeta(action: string, meta: Record<string, unknown> | n
     return meta.ok ? 'ready' : 'needs attention';
   }
   return '';
-}
-
-/**
- * Shared loading/error/content switch for a Tabs.Panel backed by a single query. Renders a
- * Loader while fetching, a retryable Alert on failure, and the panel's own table (with its
- * empty-state row) once the query succeeds — keeping that logic out of each panel.
- */
-function PanelBody({
-  query,
-  errorTitle,
-  children,
-}: {
-  query: UseQueryResult<unknown, unknown>;
-  errorTitle: string;
-  children: ReactNode;
-}) {
-  if (query.isLoading) {
-    return (
-      <Group justify="center" p="xl">
-        <Loader />
-      </Group>
-    );
-  }
-
-  if (query.isError) {
-    const message = axios.isAxiosError(query.error)
-      ? (query.error.response?.data as { error?: string } | undefined)?.error
-      : undefined;
-    return (
-      <Alert color="red" variant="light" icon={<IconAlertTriangle size={16} />} title={errorTitle} m="md">
-        <Stack gap="xs" align="flex-start">
-          <Text size="sm">{message ?? 'Something went wrong.'}</Text>
-          <Button variant="light" size="xs" onClick={() => query.refetch()}>
-            Retry
-          </Button>
-        </Stack>
-      </Alert>
-    );
-  }
-
-  return <>{children}</>;
 }
 
 /** Strip trailing slashes from the base directory prefix. */
@@ -435,14 +397,8 @@ export function ProjectDetailPage() {
       closeEditModal();
     },
     onError: (error) => {
-      if (axios.isAxiosError(error) && error.response?.status === 422) {
-        const errors = error.response.data?.errors as Record<string, string[]> | undefined;
-        if (errors) {
-          editForm.setErrors(
-            Object.fromEntries(Object.entries(errors).map(([field, messages]) => [field, messages[0]])),
-          );
-        }
-      }
+      if (applyFormErrors(error, editForm)) return;
+      notifyError('Failed to update project', error);
     },
   });
 
@@ -471,21 +427,22 @@ export function ProjectDetailPage() {
       navigate(`/projects/${cloned.slug}`);
     },
     onError: (error) => {
-      if (axios.isAxiosError(error) && error.response?.status === 422) {
-        const errors = error.response.data?.errors as Record<string, string[]> | undefined;
-        if (errors) {
+      // The server validates the composed `base_path`; surface that on the subpath input (also
+      // used as the fallback absolute-path field when no base paths are configured) by remapping
+      // the field before applyFormErrors writes it onto the form.
+      const remapped = {
+        setErrors: (errors: Record<string, string>) =>
           cloneForm.setErrors(
             Object.fromEntries(
-              // The server validates the composed `base_path`; surface that on the subpath input
-              // (also used as the fallback absolute-path field when no base paths are configured).
-              Object.entries(errors).map(([field, messages]) => [
+              Object.entries(errors).map(([field, message]) => [
                 field === 'base_path' ? 'base_subpath' : field,
-                messages[0],
+                message,
               ]),
             ),
-          );
-        }
-      }
+          ),
+      };
+      if (applyFormErrors(error, remapped)) return;
+      notifyError('Failed to clone project', error);
     },
   });
 
@@ -566,9 +523,16 @@ export function ProjectDetailPage() {
 
   if (!project.data) {
     return (
-      <Text c="dimmed" size="sm">
-        Project not found.
-      </Text>
+      <EmptyState
+        icon={<IconFolders size={32} />}
+        title="Project not found"
+        description="This project may have been deleted or the link is out of date."
+        action={
+          <Button component={Link} to="/projects" variant="light">
+            Back to projects
+          </Button>
+        }
+      />
     );
   }
 
@@ -666,6 +630,7 @@ export function ProjectDetailPage() {
               size="xs"
               leftSection={<IconPencil size={14} />}
               onClick={openEditModal}
+              disabled={p.status === 'deleting'}
             >
               Edit
             </Button>
@@ -676,6 +641,7 @@ export function ProjectDetailPage() {
               size="xs"
               leftSection={<IconCopy size={14} />}
               onClick={openCloneModal}
+              disabled={p.status === 'deleting'}
             >
               Clone
             </Button>
@@ -686,6 +652,7 @@ export function ProjectDetailPage() {
               size="xs"
               color={p.status === 'active' ? 'red' : 'green'}
               onClick={confirmToggleStatus}
+              disabled={p.status === 'deleting'}
             >
               {p.status === 'active' ? 'Disable' : 'Enable'}
             </Button>
@@ -697,6 +664,7 @@ export function ProjectDetailPage() {
               color="red"
               leftSection={<IconTrash size={14} />}
               onClick={openDeleteDisclosure}
+              disabled={p.status === 'deleting'}
             >
               Delete
             </Button>
@@ -828,6 +796,15 @@ export function ProjectDetailPage() {
                         key={d.id}
                         onClick={() => setSelectedDeployment(d.id)}
                         style={{ cursor: 'pointer' }}
+                        tabIndex={0}
+                        role="button"
+                        aria-label={`View deployment ${d.id}`}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setSelectedDeployment(d.id);
+                          }
+                        }}
                       >
                         <Table.Td>
                           <ReleaseVersion version={d.release?.version} fallback={`#${d.release_id}`} />

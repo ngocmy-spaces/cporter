@@ -4,13 +4,13 @@ import {
   Button,
   Code,
   Group,
-  Loader,
   Modal,
   NumberInput,
   Pagination,
   Paper,
   SegmentedControl,
   Select,
+  Skeleton,
   Stack,
   Table,
   Text,
@@ -22,10 +22,12 @@ import { useForm } from '@mantine/form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { IconPlus, IconSearch, IconTrash } from '@tabler/icons-react';
-import axios from 'axios';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { PanelBody } from '@/components/PanelBody';
+import { EmptyState } from '@/components/EmptyState';
+import { notifySuccess, notifyError, applyFormErrors } from '@/lib/feedback';
 import { DeploymentStatusBadge } from '@/components/StatusBadge';
 import { ReleaseVersion } from '@/components/ReleaseVersion';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
@@ -182,26 +184,17 @@ export function ProjectsPage() {
       };
       return (await api.post<ApiEnvelope<Project>>('/projects', payload)).data.data;
     },
-    onSuccess: () => {
+    onSuccess: (project) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       form.reset();
       close();
+      notifySuccess('Project created', `${project.name} is ready to receive deployments.`);
     },
     onError: (error) => {
-      if (axios.isAxiosError(error) && error.response?.status === 422) {
-        const errors = error.response.data?.errors as Record<string, string[]> | undefined;
-        if (errors) {
-          form.setErrors(
-            Object.fromEntries(
-              // The server validates the composed `base_path`; surface that on the subpath input.
-              Object.entries(errors).map(([field, messages]) => [
-                field === 'base_path' ? 'base_subpath' : field,
-                messages[0],
-              ]),
-            ),
-          );
-        }
-      }
+      // The server validates the composed `base_path`; surface that on the subpath input.
+      if (applyFormErrors(error, form, (field) => (field === 'base_path' ? 'base_subpath' : field)))
+        return;
+      notifyError('Failed to create project', error);
     },
   });
 
@@ -239,31 +232,59 @@ export function ProjectsPage() {
             leftSection={<IconSearch size={16} />}
             value={search}
             onChange={(e) => setSearch(e.currentTarget.value)}
-            w={320}
+            w={{ base: '100%', sm: 320 }}
           />
           <SegmentedControl data={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} size="sm" />
         </Group>
       )}
 
       <Paper withBorder radius="md">
-        {projects.isLoading ? (
-          <Group justify="center" p="xl">
-            <Loader />
-          </Group>
-        ) : rows.length === 0 && !isFiltering ? (
-          <Stack align="center" gap="xs" p="xl">
-            <Text fw={500}>No projects yet</Text>
-            <Text c="dimmed" size="sm" ta="center">
-              Create a project to point cPorter at a cPanel target, then deploy to it from CI.
-            </Text>
-            {isAdmin && (
-              <Button mt="xs" leftSection={<IconPlus size={16} />} onClick={open}>
-                New project
-              </Button>
-            )}
-          </Stack>
-        ) : (
-          <Table.ScrollContainer minWidth={900}>
+        <PanelBody
+          query={projects}
+          errorTitle="Couldn't load projects"
+          loader={
+            <Table.ScrollContainer minWidth={900}>
+              <Table verticalSpacing="sm">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Name</Table.Th>
+                    <Table.Th>Type</Table.Th>
+                    <Table.Th>Base path</Table.Th>
+                    <Table.Th>Live size</Table.Th>
+                    <Table.Th>Releases</Table.Th>
+                    <Table.Th>Last deploy</Table.Th>
+                    <Table.Th>Status</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <Table.Tr key={i}>
+                      {Array.from({ length: 7 }).map((__, j) => (
+                        <Table.Td key={j}>
+                          <Skeleton height={16} radius="sm" />
+                        </Table.Td>
+                      ))}
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          }
+        >
+          {rows.length === 0 && !isFiltering ? (
+            <EmptyState
+              title="No projects yet"
+              description="Create a project to point cPorter at a cPanel target, then deploy to it from CI."
+              action={
+                isAdmin ? (
+                  <Button leftSection={<IconPlus size={16} />} onClick={open}>
+                    New project
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <Table.ScrollContainer minWidth={900}>
             <Table highlightOnHover verticalSpacing="sm">
               <Table.Thead>
                 <Table.Tr>
@@ -349,7 +370,8 @@ export function ProjectsPage() {
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
-        )}
+          )}
+        </PanelBody>
       </Paper>
 
       {meta && meta.last_page > 1 && (

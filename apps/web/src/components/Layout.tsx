@@ -53,7 +53,7 @@ function UserMenu() {
         <Menu.Target>
           <UnstyledButton aria-label="Account menu">
             <Group gap={6}>
-              <Text size="sm" c="dimmed">
+              <Text size="sm" c="dimmed" truncate maw={180} visibleFrom="sm">
                 {user.email}
               </Text>
               <IconChevronDown size={16} stroke={1.5} />
@@ -121,7 +121,7 @@ export function Layout() {
           </Group>
           <Group gap="sm">
             <Badge variant="light" color="gray">
-              v0.1.0
+              v{import.meta.env.VITE_APP_VERSION ?? '0.1.0'}
             </Badge>
             <Tooltip label="Documentation">
               <ActionIcon

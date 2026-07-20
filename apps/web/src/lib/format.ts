@@ -45,6 +45,17 @@ export function isShortenedRef(version: string | null | undefined): boolean {
   return !!version && shortRef(version) !== version;
 }
 
+/** Humanize a millisecond duration: `840 ms`, `2.5s`, `1m 5s`. */
+export function formatDuration(ms: number | null | undefined): string {
+  if (ms == null) return '—';
+  if (ms < 1000) return `${ms} ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remSeconds = Math.round(seconds % 60);
+  return `${minutes}m ${remSeconds}s`;
+}
+
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null) return '—';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];

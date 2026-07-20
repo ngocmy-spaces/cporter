@@ -43,7 +43,30 @@ interface EnvFormValues {
  */
 export function ProjectEnvPanel({ slug, active }: { slug: string; active: boolean }) {
   const queryClient = useQueryClient();
-  const form = useForm<EnvFormValues>({ initialValues: { env_vars: [] } });
+  const form = useForm<EnvFormValues>({
+    initialValues: { env_vars: [] },
+    validateInputOnBlur: true,
+    // Per-key syntax + duplicate detection so users get instant feedback instead of a server 422.
+    validate: (values) => {
+      const errors: Record<string, string> = {};
+      const counts = new Map<string, number>();
+      for (const v of values.env_vars) {
+        const k = v.key.trim();
+        if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
+      }
+      values.env_vars.forEach((v, index) => {
+        const k = v.key.trim();
+        if (!k) return; // blank rows are dropped on save, not invalid
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) {
+          errors[`env_vars.${index}.key`] =
+            'Must start with a letter or underscore (letters, digits, underscores only)';
+        } else if ((counts.get(k) ?? 0) > 1) {
+          errors[`env_vars.${index}.key`] = 'Duplicate key';
+        }
+      });
+      return errors;
+    },
+  });
 
   const [importOpened, importModal] = useDisclosure(false);
   const [importText, setImportText] = useState('');
@@ -237,7 +260,7 @@ export function ProjectEnvPanel({ slug, active }: { slug: string; active: boolea
         <form onSubmit={form.onSubmit((values) => save.mutate(values))}>
           <Stack gap="xs">
             {form.values.env_vars.map((_, index) => (
-              <Group key={index} gap="xs" align="flex-start" wrap="nowrap">
+              <Group key={form.key(`env_vars.${index}`)} gap="xs" align="flex-start" wrap="nowrap">
                 <TextInput
                   placeholder="APP_KEY"
                   aria-label="Variable key"
@@ -277,9 +300,16 @@ export function ProjectEnvPanel({ slug, active }: { slug: string; active: boolea
               >
                 Add variable
               </Button>
-              <Button type="submit" loading={save.isPending}>
-                Save
-              </Button>
+              <Group gap="sm">
+                {form.isDirty() && (
+                  <Text size="xs" c="dimmed">
+                    Unsaved changes
+                  </Text>
+                )}
+                <Button type="submit" loading={save.isPending} disabled={!form.isDirty()}>
+                  Save
+                </Button>
+              </Group>
             </Group>
 
             <Text size="xs" c="dimmed">

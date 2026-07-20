@@ -1,9 +1,9 @@
-import { Divider, Drawer, Group, Loader, Stack, Text, Timeline } from '@mantine/core';
+import { Alert, Button, Divider, Drawer, Group, Loader, Stack, Text, Timeline } from '@mantine/core';
 import { IconAlertTriangle, IconCheck, IconX } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { api } from '@/lib/api';
-import { formatBytes, formatDateTime } from '@/lib/format';
+import { formatBytes, formatDateTime, formatDuration } from '@/lib/format';
 import { DeploymentStatusBadge } from '@/components/StatusBadge';
 import { ReleaseVersion } from '@/components/ReleaseVersion';
 import type { ApiEnvelope, Deployment, DeploymentStatus, DeploymentStep } from '@/lib/types';
@@ -57,6 +57,17 @@ export function DeploymentDrawer({
         </Group>
       )}
 
+      {query.isError && (
+        <Alert color="red" variant="light" icon={<IconAlertTriangle size={16} />} title="Couldn't load deployment">
+          <Stack gap="xs" align="flex-start">
+            <Text size="sm">The deployment details could not be loaded.</Text>
+            <Button variant="light" size="xs" onClick={() => query.refetch()}>
+              Retry
+            </Button>
+          </Stack>
+        </Alert>
+      )}
+
       {deployment && (
         <Stack gap="md">
           <Group gap="xs">
@@ -90,7 +101,7 @@ export function DeploymentDrawer({
                   bullet={STEP_BULLET[step.status] ?? <IconX size={12} />}
                 >
                   <Text size="xs" c="dimmed">
-                    {step.duration_ms} ms
+                    {formatDuration(step.duration_ms)}
                   </Text>
                   {step.error && (
                     <Text size="xs" c="red" mt={4}>
@@ -98,12 +109,24 @@ export function DeploymentDrawer({
                     </Text>
                   )}
                   {step.note && (
-                    <Text size="xs" c="yellow.8" mt={4}>
+                    <Text size="xs" c="dimmed" mt={4}>
                       {step.note}
                     </Text>
                   )}
                 </Timeline.Item>
               ))}
+
+              {!TERMINAL_STATUSES.has(deployment.status) && (
+                <Timeline.Item
+                  key="in-progress"
+                  title={
+                    <Text size="sm" c="dimmed">
+                      In progress…
+                    </Text>
+                  }
+                  bullet={<Loader size={12} />}
+                />
+              )}
             </Timeline>
           ) : (
             <Text size="sm" c="dimmed">

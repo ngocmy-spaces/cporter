@@ -1,8 +1,10 @@
-import { Alert, Badge, Button, Card, Group, List, Loader, SimpleGrid, Stack, Text, ThemeIcon, Title } from '@mantine/core';
+import { Alert, Badge, Button, Card, Group, List, SimpleGrid, Skeleton, Stack, Text, ThemeIcon, Title } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { IconCheck, IconRefresh, IconX } from '@tabler/icons-react';
+import { PanelBody } from '@/components/PanelBody';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { notifyError, notifySuccess } from '@/lib/feedback';
 import { formatBytes, formatDateTime, formatRelativeTime } from '@/lib/format';
 import type { Capabilities, CronStatus } from '@/lib/types';
 
@@ -31,21 +33,12 @@ export function SettingsPage() {
     mutationFn: async () => (await api.post<CapabilitiesResponse>('/system/capabilities/refresh')).data,
     onSuccess: (data) => {
       queryClient.setQueryData(['system', 'capabilities'], data);
+      notifySuccess('Capabilities re-probed', 'Host capabilities have been refreshed.');
     },
+    onError: (error) => notifyError('Re-probe failed', error),
   });
 
-  if (capabilities.isLoading) {
-    return (
-      <Group justify="center" p="xl">
-        <Loader />
-      </Group>
-    );
-  }
-
   const result = capabilities.data?.data;
-  if (!result) {
-    return <Alert color="red">Unable to load system capabilities.</Alert>;
-  }
 
   return (
     <Stack gap="lg">
@@ -69,68 +62,87 @@ export function SettingsPage() {
 
       <CronCard status={cron.data} loading={cron.isLoading} />
 
-      <SimpleGrid cols={{ base: 1, sm: 2 }}>
-        <Card withBorder radius="md" p="md">
-          <Text fw={600} mb="xs">
-            Runtime
-          </Text>
-          <Stack gap={4}>
-            <Row label="PHP version" value={result.php_version} />
-            <Row label="SAPI" value={result.sapi} />
-            <Row label="open_basedir" value={result.open_basedir ?? '—'} />
-            <Row label="Command driver" value={result.command_driver ?? '—'} />
-            <Row label="Cron token" value={result.cron_token_configured ? 'configured' : 'missing'} />
-            <Row label="Symlink runtime" value={result.symlink_runtime ? 'available' : 'unavailable'} />
+      <PanelBody
+        query={capabilities}
+        errorTitle="Couldn't load system capabilities"
+        loader={
+          <Stack gap="lg">
+            <SimpleGrid cols={{ base: 1, sm: 2 }}>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} height={180} radius="md" />
+              ))}
+            </SimpleGrid>
+            <Skeleton height={120} radius="md" />
           </Stack>
-        </Card>
+        }
+      >
+        {result && (
+          <Stack gap="lg">
+            <SimpleGrid cols={{ base: 1, sm: 2 }}>
+              <Card withBorder radius="md" p="md">
+                <Text fw={600} mb="xs">
+                  Runtime
+                </Text>
+                <Stack gap={4}>
+                  <Row label="PHP version" value={result.php_version} />
+                  <Row label="SAPI" value={result.sapi} />
+                  <Row label="open_basedir" value={result.open_basedir ?? '—'} />
+                  <Row label="Command driver" value={result.command_driver ?? '—'} />
+                  <Row label="Cron token" value={result.cron_token_configured ? 'configured' : 'missing'} />
+                  <Row label="Symlink runtime" value={result.symlink_runtime ? 'available' : 'unavailable'} />
+                </Stack>
+              </Card>
 
-        <Card withBorder radius="md" p="md">
-          <Text fw={600} mb="xs">
-            Limits &amp; disk
-          </Text>
-          <Stack gap={4}>
-            <Row label="Upload max filesize" value={result.limits.upload_max_filesize} />
-            <Row label="Post max size" value={result.limits.post_max_size} />
-            <Row label="Memory limit" value={result.limits.memory_limit} />
-            <Row label="Max execution time" value={`${result.limits.max_execution_time}s`} />
-            <Row label="Disk free" value={formatBytes(result.disk.free)} />
-            <Row label="Disk total" value={formatBytes(result.disk.total)} />
+              <Card withBorder radius="md" p="md">
+                <Text fw={600} mb="xs">
+                  Limits &amp; disk
+                </Text>
+                <Stack gap={4}>
+                  <Row label="Upload max filesize" value={result.limits.upload_max_filesize} />
+                  <Row label="Post max size" value={result.limits.post_max_size} />
+                  <Row label="Memory limit" value={result.limits.memory_limit} />
+                  <Row label="Max execution time" value={`${result.limits.max_execution_time}s`} />
+                  <Row label="Disk free" value={formatBytes(result.disk.free)} />
+                  <Row label="Disk total" value={formatBytes(result.disk.total)} />
+                </Stack>
+              </Card>
+
+              <Card withBorder radius="md" p="md">
+                <Text fw={600} mb="xs">
+                  Extensions
+                </Text>
+                <FlagList flags={result.extensions} />
+              </Card>
+
+              <Card withBorder radius="md" p="md">
+                <Text fw={600} mb="xs">
+                  Functions
+                </Text>
+                <FlagList flags={result.functions} />
+              </Card>
+            </SimpleGrid>
+
+            <Card withBorder radius="md" p="md">
+              <Text fw={600} mb="xs">
+                Allowed base paths
+              </Text>
+              {result.allowed_base_paths.length === 0 ? (
+                <Text c="dimmed" size="sm">
+                  None configured.
+                </Text>
+              ) : (
+                <List spacing={4} size="sm">
+                  {result.allowed_base_paths.map((p) => (
+                    <List.Item key={p.path}>
+                      {p.path} — {p.exists ? 'exists' : 'missing'}, {p.writable ? 'writable' : 'read-only'}
+                    </List.Item>
+                  ))}
+                </List>
+              )}
+            </Card>
           </Stack>
-        </Card>
-
-        <Card withBorder radius="md" p="md">
-          <Text fw={600} mb="xs">
-            Extensions
-          </Text>
-          <FlagList flags={result.extensions} />
-        </Card>
-
-        <Card withBorder radius="md" p="md">
-          <Text fw={600} mb="xs">
-            Functions
-          </Text>
-          <FlagList flags={result.functions} />
-        </Card>
-      </SimpleGrid>
-
-      <Card withBorder radius="md" p="md">
-        <Text fw={600} mb="xs">
-          Allowed base paths
-        </Text>
-        {result.allowed_base_paths.length === 0 ? (
-          <Text c="dimmed" size="sm">
-            None configured.
-          </Text>
-        ) : (
-          <List spacing={4} size="sm">
-            {result.allowed_base_paths.map((p) => (
-              <List.Item key={p.path}>
-                {p.path} — {p.exists ? 'exists' : 'missing'}, {p.writable ? 'writable' : 'read-only'}
-              </List.Item>
-            ))}
-          </List>
         )}
-      </Card>
+      </PanelBody>
     </Stack>
   );
 }

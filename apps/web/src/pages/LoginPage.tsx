@@ -55,6 +55,8 @@ export function LoginPage() {
             label="Email"
             placeholder="you@example.com"
             required
+            data-autofocus
+            autoFocus
             {...form.getInputProps('email')}
           />
           <PasswordInput

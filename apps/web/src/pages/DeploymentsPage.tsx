@@ -2,22 +2,25 @@ import { useMemo, useState } from 'react';
 import {
   Card,
   Group,
-  Loader,
   Paper,
   SegmentedControl,
   Select,
   SimpleGrid,
+  Skeleton,
   Stack,
   Table,
   Text,
   Title,
 } from '@mantine/core';
+import { IconRocket } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { DeploymentDrawer } from '@/components/DeploymentDrawer';
 import { DeploymentStatusBadge } from '@/components/StatusBadge';
 import { ReleaseVersion } from '@/components/ReleaseVersion';
-import { formatRelativeTime } from '@/lib/format';
+import { EmptyState } from '@/components/EmptyState';
+import { PanelBody } from '@/components/PanelBody';
+import { TimeAgo } from '@/components/TimeAgo';
 import type { ApiEnvelope, Deployment, DeploymentStatus } from '@/lib/types';
 
 const IN_FLIGHT = new Set<DeploymentStatus>(['queued', 'running', 'hooks_pending']);
@@ -112,17 +115,29 @@ export function DeploymentsPage() {
           onChange={setProjectFilter}
           clearable
           searchable
-          w={260}
+          w={{ base: '100%', sm: 260 }}
         />
-        <SegmentedControl data={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} size="sm" />
+        <SegmentedControl
+          data={STATUS_FILTERS}
+          value={statusFilter}
+          onChange={setStatusFilter}
+          size="sm"
+          w={{ base: '100%', sm: 'auto' }}
+        />
       </Group>
 
       <Paper withBorder radius="md">
-        {deployments.isLoading ? (
-          <Group justify="center" p="xl">
-            <Loader />
-          </Group>
-        ) : (
+        <PanelBody
+          query={deployments}
+          errorTitle="Couldn't load deployments"
+          loader={
+            <Stack gap="sm" p="md">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Skeleton key={i} height={32} radius="sm" />
+              ))}
+            </Stack>
+          }
+        >
           <Table.ScrollContainer minWidth={700}>
             <Table highlightOnHover verticalSpacing="sm">
               <Table.Thead>
@@ -136,7 +151,20 @@ export function DeploymentsPage() {
               </Table.Thead>
               <Table.Tbody>
                 {filtered.map((d) => (
-                  <Table.Tr key={d.id} onClick={() => setSelectedId(d.id)} style={{ cursor: 'pointer' }}>
+                  <Table.Tr
+                    key={d.id}
+                    onClick={() => setSelectedId(d.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSelectedId(d.id);
+                      }
+                    }}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`View deployment ${d.id}`}
+                    style={{ cursor: 'pointer' }}
+                  >
                     <Table.Td>{d.project?.name ?? `#${d.project_id}`}</Table.Td>
                     <Table.Td>
                       <ReleaseVersion version={d.release?.version} fallback={`#${d.release_id}`} />
@@ -145,24 +173,30 @@ export function DeploymentsPage() {
                       <DeploymentStatusBadge status={d.status} />
                     </Table.Td>
                     <Table.Td>{d.trigger}</Table.Td>
-                    <Table.Td>{formatRelativeTime(d.created_at)}</Table.Td>
+                    <Table.Td>
+                      <TimeAgo iso={d.created_at} />
+                    </Table.Td>
                   </Table.Tr>
                 ))}
                 {filtered.length === 0 && (
                   <Table.Tr>
                     <Table.Td colSpan={5}>
-                      <Text c="dimmed" size="sm" ta="center" py="sm">
-                        {all.length === 0
-                          ? 'No deployments yet.'
-                          : 'No deployments match the current filters.'}
-                      </Text>
+                      <EmptyState
+                        icon={<IconRocket size={28} />}
+                        title={all.length === 0 ? 'No deployments yet' : 'No matching deployments'}
+                        description={
+                          all.length === 0
+                            ? 'Deployments will appear here once projects start shipping.'
+                            : 'No deployments match the current filters.'
+                        }
+                      />
                     </Table.Td>
                   </Table.Tr>
                 )}
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
-        )}
+        </PanelBody>
       </Paper>
 
       <DeploymentDrawer deploymentId={selectedId} onClose={() => setSelectedId(null)} />

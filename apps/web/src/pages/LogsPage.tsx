@@ -1,8 +1,11 @@
 import { useMemo, useState } from 'react';
-import { Badge, Code, Group, Loader, Paper, Select, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
+import { Badge, Code, Paper, Select, Skeleton, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
+import { IconHistory } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { formatRelativeTime } from '@/lib/format';
+import { EmptyState } from '@/components/EmptyState';
+import { PanelBody } from '@/components/PanelBody';
+import { TimeAgo } from '@/components/TimeAgo';
 import type { ApiEnvelope, AuditLog } from '@/lib/types';
 
 /** `App\Models\Deployment` -> `Deployment` */
@@ -60,11 +63,17 @@ export function LogsPage() {
       />
 
       <Paper withBorder radius="md">
-        {auditLogs.isLoading ? (
-          <Group justify="center" p="xl">
-            <Loader />
-          </Group>
-        ) : (
+        <PanelBody
+          query={auditLogs}
+          errorTitle="Couldn't load activity"
+          loader={
+            <Stack gap="sm" p="md">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} height={32} radius="sm" />
+              ))}
+            </Stack>
+          }
+        >
           <Table.ScrollContainer minWidth={800}>
             <Table highlightOnHover verticalSpacing="sm">
               <Table.Thead>
@@ -121,23 +130,31 @@ export function LogsPage() {
                           {log.ip ?? '—'}
                         </Text>
                       </Table.Td>
-                      <Table.Td>{formatRelativeTime(log.created_at)}</Table.Td>
+                      <Table.Td>
+                        <TimeAgo iso={log.created_at} />
+                      </Table.Td>
                     </Table.Tr>
                   );
                 })}
                 {filteredLogs.length === 0 && (
                   <Table.Tr>
                     <Table.Td colSpan={6}>
-                      <Text c="dimmed" size="sm">
-                        No audit events yet.
-                      </Text>
+                      <EmptyState
+                        icon={<IconHistory size={28} />}
+                        title={allLogs.length === 0 ? 'No activity yet' : 'No matching activity'}
+                        description={
+                          allLogs.length === 0
+                            ? 'Audit events will appear here as actions happen across cPorter.'
+                            : 'No audit events match the current filter.'
+                        }
+                      />
                     </Table.Td>
                   </Table.Tr>
                 )}
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
-        )}
+        </PanelBody>
       </Paper>
     </Stack>
   );

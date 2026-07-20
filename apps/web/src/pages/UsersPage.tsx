@@ -3,11 +3,11 @@ import {
   Badge,
   Button,
   Group,
-  Loader,
   Modal,
   Paper,
   PasswordInput,
   Select,
+  Skeleton,
   Stack,
   Table,
   Text,
@@ -19,10 +19,11 @@ import { useForm } from '@mantine/form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
-import { IconCheck, IconLock, IconPlus, IconTrash, IconX } from '@tabler/icons-react';
-import axios from 'axios';
+import { IconCheck, IconLock, IconPlus, IconTrash } from '@tabler/icons-react';
+import { PanelBody } from '@/components/PanelBody';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { applyFormErrors, notifyError } from '@/lib/feedback';
 import { formatDateTime } from '@/lib/format';
 import type { ApiEnvelope, User, UserRole } from '@/lib/types';
 
@@ -76,21 +77,8 @@ export function UsersPage() {
       close();
     },
     onError: (error) => {
-      if (axios.isAxiosError(error) && error.response?.status === 422) {
-        const errors = error.response.data?.errors as Record<string, string[]> | undefined;
-        if (errors) {
-          form.setErrors(
-            Object.fromEntries(Object.entries(errors).map(([field, messages]) => [field, messages[0]])),
-          );
-          return;
-        }
-      }
-      notifications.show({
-        color: 'red',
-        title: 'Failed to create user',
-        message: 'Please try again.',
-        icon: <IconX size={16} />,
-      });
+      if (applyFormErrors(error, form)) return;
+      notifyError('Failed to create user', error);
     },
   });
 
@@ -105,17 +93,7 @@ export function UsersPage() {
       });
       queryClient.invalidateQueries({ queryKey: ['users'] });
     },
-    onError: (error) => {
-      const message = axios.isAxiosError(error)
-        ? (error.response?.data as { message?: string } | undefined)?.message
-        : undefined;
-      notifications.show({
-        color: 'red',
-        title: 'Failed to delete user',
-        message: message ?? 'Please try again.',
-        icon: <IconX size={16} />,
-      });
-    },
+    onError: (error) => notifyError('Failed to delete user', error),
   });
 
   const confirmDelete = (u: User) => {
@@ -163,11 +141,17 @@ export function UsersPage() {
       </Group>
 
       <Paper withBorder radius="md">
-        {users.isLoading ? (
-          <Group justify="center" p="xl">
-            <Loader />
-          </Group>
-        ) : (
+        <PanelBody
+          query={users}
+          errorTitle="Couldn't load users"
+          loader={
+            <Stack gap="xs" p="md">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} height={40} radius="sm" />
+              ))}
+            </Stack>
+          }
+        >
           <Table.ScrollContainer minWidth={600}>
             <Table highlightOnHover verticalSpacing="sm">
               <Table.Thead>
@@ -222,7 +206,7 @@ export function UsersPage() {
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
-        )}
+        </PanelBody>
       </Paper>
 
       <Modal opened={opened} onClose={closeModal} title="New user" size="md">

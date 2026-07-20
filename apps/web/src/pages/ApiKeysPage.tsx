@@ -6,11 +6,11 @@ import {
   Code,
   CopyButton,
   Group,
-  Loader,
   Modal,
   MultiSelect,
   Paper,
   Select,
+  Skeleton,
   Stack,
   Table,
   Text,
@@ -23,9 +23,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import { IconCheck, IconCopy, IconPlus, IconTrash, IconX } from '@tabler/icons-react';
-import axios from 'axios';
+import { PanelBody } from '@/components/PanelBody';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { applyFormErrors, notifyError, notifySuccess } from '@/lib/feedback';
 import { formatDateTime } from '@/lib/format';
 import type { ApiEnvelope, ApiKey, Project } from '@/lib/types';
 
@@ -61,6 +62,10 @@ export function ApiKeysPage() {
     initialValues: INITIAL_VALUES,
     validate: {
       name: (value) => (value.trim().length > 0 ? null : 'Name is required'),
+      expires_at: (value) => {
+        if (!value) return null; // empty = no expiry
+        return Number.isNaN(new Date(value).getTime()) ? 'Enter a valid date' : null;
+      },
     },
   });
 
@@ -78,14 +83,11 @@ export function ApiKeysPage() {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] });
       setNewToken(data.token);
       form.reset();
+      notifySuccess('API key created', `"${data.data.name}" is ready to use.`);
     },
     onError: (error) => {
-      if (axios.isAxiosError(error) && error.response?.status === 422) {
-        const errors = error.response.data?.errors as Record<string, string[]> | undefined;
-        if (errors) {
-          form.setErrors(Object.fromEntries(Object.entries(errors).map(([f, m]) => [f, m[0]])));
-        }
-      }
+      if (applyFormErrors(error, form)) return;
+      notifyError('Failed to create API key', error);
     },
   });
 
@@ -149,11 +151,17 @@ export function ApiKeysPage() {
       </Group>
 
       <Paper withBorder radius="md">
-        {apiKeys.isLoading ? (
-          <Group justify="center" p="xl">
-            <Loader />
-          </Group>
-        ) : (
+        <PanelBody
+          query={apiKeys}
+          errorTitle="Couldn't load API keys"
+          loader={
+            <Stack gap="xs" p="md">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} height={40} radius="sm" />
+              ))}
+            </Stack>
+          }
+        >
           <Table.ScrollContainer minWidth={700}>
             <Table highlightOnHover verticalSpacing="sm">
               <Table.Thead>
@@ -221,7 +229,7 @@ export function ApiKeysPage() {
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
-        )}
+        </PanelBody>
       </Paper>
 
       <Modal opened={opened} onClose={closeModal} title="New API key" size="lg">
@@ -265,7 +273,8 @@ export function ApiKeysPage() {
               />
               <TextInput
                 label="Expires at"
-                placeholder="YYYY-MM-DD"
+                type="date"
+                description="Leave empty for no expiry."
                 {...form.getInputProps('expires_at')}
               />
               <Group justify="flex-end" mt="md">
