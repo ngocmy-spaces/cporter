@@ -16,6 +16,8 @@ import { DocsOverviewPage } from '@/pages/docs/DocsOverviewPage';
 import { DocsCpanelSetupPage } from '@/pages/docs/DocsCpanelSetupPage';
 import { DocsQuickstartPage } from '@/pages/docs/DocsQuickstartPage';
 import { DocsGithubActionPage } from '@/pages/docs/DocsGithubActionPage';
+import { DocsArtifactPage } from '@/pages/docs/DocsArtifactPage';
+import { DocsEnvPage } from '@/pages/docs/DocsEnvPage';
 import { DocsMcpPage } from '@/pages/docs/DocsMcpPage';
 import { DocsApiReferencePage } from '@/pages/docs/DocsApiReferencePage';
 
@@ -52,6 +54,8 @@ export function App() {
         <Route path="cpanel-setup" element={<DocsCpanelSetupPage />} />
         <Route path="quickstart" element={<DocsQuickstartPage />} />
         <Route path="github-action" element={<DocsGithubActionPage />} />
+        <Route path="artifact" element={<DocsArtifactPage />} />
+        <Route path="env" element={<DocsEnvPage />} />
         <Route path="mcp" element={<DocsMcpPage />} />
         <Route path="api-reference" element={<DocsApiReferencePage />} />
         <Route path="*" element={<Navigate to="overview" replace />} />

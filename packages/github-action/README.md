@@ -4,6 +4,11 @@ Deploy a built artifact to [cPorter](../../README.md) from a GitHub workflow. Th
 composite action over [`@cporter/cli`](../cli) — it builds nothing itself; point it at an
 artifact `.zip` your job already produced.
 
+> **What goes in the zip?** The layout depends on your project type (static, Laravel, Node,
+> WordPress) and how you handle `vendor/`/`node_modules` and `.env`. See
+> [Artifact & packaging](../../docs/ARTIFACT.md) for the contract and a copy-paste recipe per
+> type, and [Environment variables](../../docs/ENVIRONMENT.md) for `.env`.
+
 ## Usage
 
 ```yaml

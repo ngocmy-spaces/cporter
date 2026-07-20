@@ -7,6 +7,8 @@ import {
   IconArrowLeft,
   IconBrandGithub,
   IconInfoCircle,
+  IconKey,
+  IconPackage,
   IconRobot,
   IconServer,
   IconTerminal2,
@@ -24,6 +26,8 @@ const DOCS_NAV: DocsNavItem[] = [
   { to: '/docs/cpanel-setup', label: 'cPanel setup', icon: IconServer },
   { to: '/docs/quickstart', label: 'Quickstart (CLI)', icon: IconTerminal2 },
   { to: '/docs/github-action', label: 'GitHub Action', icon: IconBrandGithub },
+  { to: '/docs/artifact', label: 'Artifact & packaging', icon: IconPackage },
+  { to: '/docs/env', label: 'Environment variables', icon: IconKey },
   { to: '/docs/mcp', label: 'AI agent (MCP)', icon: IconRobot },
   { to: '/docs/api-reference', label: 'API reference', icon: IconApi },
 ];

@@ -56,6 +56,11 @@ export function DocsGithubActionPage() {
         <Title order={4} mb="xs">
           Full example workflow
         </Title>
+        <Text size="sm" c="dimmed" mb="sm">
+          This packages a static site. The zip layout differs per project type (Laravel, Node,
+          WordPress…) — see <Anchor component={Link} to="/docs/artifact">Artifact &amp; packaging</Anchor>{' '}
+          for the contract and a recipe for each.
+        </Text>
         <CodeBlock label="yaml · .github/workflows/deploy.yml" code={FULL_WORKFLOW} />
       </Card>
 
@@ -87,6 +92,7 @@ export function DocsGithubActionPage() {
       </Card>
 
       <Text size="sm" c="dimmed">
+        Not sure what to put in the zip? See <Anchor component={Link} to="/docs/artifact">Artifact &amp; packaging</Anchor>.
         Prefer to script it yourself? See the <Anchor component={Link} to="/docs/api-reference">API reference</Anchor>{' '}
         or the <Anchor component={Link} to="/docs/quickstart">CLI quickstart</Anchor>.
       </Text>

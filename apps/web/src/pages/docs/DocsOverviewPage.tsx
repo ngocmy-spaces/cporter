@@ -25,6 +25,12 @@ const INTEGRATIONS = [
     description: 'A reusable composite action that wraps the CLI for GitHub workflows.',
   },
   {
+    to: '/docs/artifact',
+    icon: IconFileZip,
+    title: 'Artifact & packaging',
+    description: 'How to build the .zip — the contract plus a recipe per project type.',
+  },
+  {
     to: '/docs/mcp',
     icon: IconRobot,
     title: 'AI agent (MCP)',
