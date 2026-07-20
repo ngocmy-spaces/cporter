@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { api } from '@/lib/api';
 import { formatBytes, formatDateTime } from '@/lib/format';
 import { DeploymentStatusBadge } from '@/components/StatusBadge';
+import { ReleaseVersion } from '@/components/ReleaseVersion';
 import type { ApiEnvelope, Deployment, DeploymentStatus, DeploymentStep } from '@/lib/types';
 
 const TERMINAL_STATUSES = new Set<DeploymentStatus>(['success', 'failed', 'rolled_back']);
@@ -62,7 +63,10 @@ export function DeploymentDrawer({
             <DeploymentStatusBadge status={deployment.status} />
             <Text size="sm" c="dimmed">
               {deployment.project?.name ?? `project #${deployment.project_id}`} · release{' '}
-              {deployment.release?.version ?? `#${deployment.release_id}`}
+              <ReleaseVersion
+                version={deployment.release?.version}
+                fallback={`#${deployment.release_id}`}
+              />
             </Text>
           </Group>
 

@@ -54,6 +54,7 @@ import { useAuth } from '@/lib/auth';
 import { DeploymentDrawer } from '@/components/DeploymentDrawer';
 import { ProjectEnvPanel } from '@/components/ProjectEnvPanel';
 import { DeploymentStatusBadge, ReleaseStateBadge } from '@/components/StatusBadge';
+import { ReleaseVersion } from '@/components/ReleaseVersion';
 import { formatBytes, formatDateTime, formatRelativeTime } from '@/lib/format';
 import type {
   ApiEnvelope,
@@ -720,7 +721,7 @@ export function ProjectDetailPage() {
               {activeRelease ? (
                 <>
                   <Text size="sm" fw={500}>
-                    {activeRelease.version}
+                    <ReleaseVersion version={activeRelease.version} />
                   </Text>
                   <Text size="xs" c="dimmed">
                     {formatRelativeTime(activeRelease.activated_at)}
@@ -828,7 +829,9 @@ export function ProjectDetailPage() {
                         onClick={() => setSelectedDeployment(d.id)}
                         style={{ cursor: 'pointer' }}
                       >
-                        <Table.Td>{d.release?.version ?? `#${d.release_id}`}</Table.Td>
+                        <Table.Td>
+                          <ReleaseVersion version={d.release?.version} fallback={`#${d.release_id}`} />
+                        </Table.Td>
                         <Table.Td>
                           <DeploymentStatusBadge status={d.status} />
                         </Table.Td>
@@ -875,7 +878,7 @@ export function ProjectDetailPage() {
                         <Table.Td>
                           <Group gap="xs" wrap="nowrap">
                             <Text size="sm" fw={r.state === 'active' ? 600 : 400}>
-                              {r.version}
+                              <ReleaseVersion version={r.version} />
                             </Text>
                             {r.state === 'active' && (
                               <Badge size="xs" color="green" variant="filled">

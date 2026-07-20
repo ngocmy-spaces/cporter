@@ -16,6 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { DeploymentDrawer } from '@/components/DeploymentDrawer';
 import { DeploymentStatusBadge } from '@/components/StatusBadge';
+import { ReleaseVersion } from '@/components/ReleaseVersion';
 import { formatRelativeTime } from '@/lib/format';
 import type { ApiEnvelope, Deployment, DeploymentStatus } from '@/lib/types';
 
@@ -137,7 +138,9 @@ export function DeploymentsPage() {
                 {filtered.map((d) => (
                   <Table.Tr key={d.id} onClick={() => setSelectedId(d.id)} style={{ cursor: 'pointer' }}>
                     <Table.Td>{d.project?.name ?? `#${d.project_id}`}</Table.Td>
-                    <Table.Td>{d.release?.version ?? `#${d.release_id}`}</Table.Td>
+                    <Table.Td>
+                      <ReleaseVersion version={d.release?.version} fallback={`#${d.release_id}`} />
+                    </Table.Td>
                     <Table.Td>
                       <DeploymentStatusBadge status={d.status} />
                     </Table.Td>

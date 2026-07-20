@@ -29,6 +29,22 @@ export function formatDateTime(iso: string | null | undefined): string {
   return new Date(iso).toLocaleString();
 }
 
+/**
+ * Shorten a release version for display. Only collapses values that look like a
+ * git commit SHA (a long run of hex, e.g. the 40-char `github.sha`) down to its
+ * first 8 chars; human labels/tags like `v1.2.3` or `20260720_001` are left
+ * untouched. Storage is unaffected — this is display-only.
+ */
+export function shortRef(version: string | null | undefined): string {
+  if (!version) return '—';
+  return /^[0-9a-f]{12,}$/i.test(version) ? version.slice(0, 8) : version;
+}
+
+/** True when `shortRef` would actually shorten this value (i.e. it's a long SHA). */
+export function isShortenedRef(version: string | null | undefined): boolean {
+  return !!version && shortRef(version) !== version;
+}
+
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null) return '—';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];

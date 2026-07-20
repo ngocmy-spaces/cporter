@@ -27,6 +27,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { DeploymentStatusBadge } from '@/components/StatusBadge';
+import { ReleaseVersion } from '@/components/ReleaseVersion';
 import { formatBytes, formatRelativeTime } from '@/lib/format';
 import type { ApiEnvelope, Capabilities, Deployment, Project, SharedPath } from '@/lib/types';
 
@@ -307,7 +308,13 @@ export function ProjectsPage() {
                           <Stack gap={2}>
                             <DeploymentStatusBadge status={last.status} />
                             <Text size="xs" c="dimmed">
-                              {last.release?.version ? `${last.release.version} · ` : ''}
+                              {last.release?.version ? (
+                                <>
+                                  <ReleaseVersion version={last.release.version} /> ·{' '}
+                                </>
+                              ) : (
+                                ''
+                              )}
                               {formatRelativeTime(last.created_at)}
                             </Text>
                           </Stack>
