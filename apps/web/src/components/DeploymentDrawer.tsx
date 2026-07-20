@@ -66,6 +66,12 @@ const PIPELINE: PipelineStage[] = [
     applies: (p) => !!p?.health_check_url,
   },
   { key: 'prune', label: 'Prune old releases', matches: (n) => n === 'prune', applies: () => true },
+  {
+    key: 'prune_artifacts',
+    label: 'Clean up artifacts',
+    matches: (n) => n === 'prune_artifacts',
+    applies: () => true,
+  },
 ];
 
 const STAGE_LABELS: Record<string, string> = Object.fromEntries(

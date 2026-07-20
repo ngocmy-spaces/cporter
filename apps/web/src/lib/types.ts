@@ -47,9 +47,11 @@ export interface Artifact {
   filename: string;
   size: number;
   sha256: string;
-  storage_path: string;
+  // Nulled once the zip is reclaimed after the deploy is stable (the row is kept for reporting).
+  storage_path: string | null;
   status: string;
   uploaded_at: string | null;
+  pruned_at: string | null;
 }
 
 export interface SharedPath {

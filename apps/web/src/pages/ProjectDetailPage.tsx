@@ -828,6 +828,11 @@ export function ProjectDetailPage() {
         <Tabs.Panel value="releases" pt="md">
           <Paper withBorder radius="md">
             <PanelBody query={releases} errorTitle="Couldn't load releases">
+              <Text size="xs" c="dimmed" p="md" pb={0}>
+                Only releases currently kept on disk are shown (bounded by <b>keep releases</b>) —
+                these are the ones you can activate or roll back to. For the full deployment
+                history, see the Deployments tab.
+              </Text>
               <Table.ScrollContainer minWidth={600}>
                 <Table highlightOnHover verticalSpacing="sm">
                   <Table.Thead>

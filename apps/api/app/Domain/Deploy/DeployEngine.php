@@ -4,6 +4,7 @@ namespace App\Domain\Deploy;
 
 use App\Adapters\Command\CommandRunner;
 use App\Adapters\Storage\StorageAdapter;
+use App\Domain\Deploy\PostDeploy\PostDeployRunner;
 use App\Enums\DeploymentStatus;
 use App\Enums\ReleaseState;
 use App\Models\Artifact;
@@ -29,6 +30,8 @@ class DeployEngine
         private readonly RollbackEngine $rollback,
         private readonly HealthChecker $health,
         private readonly CommandRunner $commands,
+        private readonly ReleasePruner $releasePruner,
+        private readonly PostDeployRunner $postDeploy,
     ) {}
 
     public function deploy(Deployment $deployment): Deployment
@@ -143,7 +146,7 @@ class DeployEngine
                 throw new DeployException("Health check failed: {$project->health_check_url}");
             }
 
-            $steps->run('prune', fn () => $this->storage->pruneReleases($project->base_path, $project->keep_releases));
+            $steps->run('prune', fn () => $this->releasePruner->prune($project, $project->keep_releases));
             $stats = $this->storage->diskStats($project->base_path);
             $project->forceFill([
                 'disk_usage' => $stats['current'],
@@ -151,7 +154,12 @@ class DeployEngine
                 'shared_disk_usage' => $this->storage->sharedPathSizes($project->base_path, $project->shared_paths ?? []),
                 'disk_usage_calculated_at' => now(),
             ])->save();
-            $deployment->forceFill(['status' => DeploymentStatus::Success, 'finished_at' => now()])->save();
+
+            // The deploy is done + stable. Mark it successful, then run non-fatal post-deploy tasks
+            // (artifact cleanup today; notifications/triggers can be added via config later).
+            $deployment->forceFill(['status' => DeploymentStatus::Success])->save();
+            $this->postDeploy->run($steps, $project, $release, $deployment);
+            $deployment->forceFill(['finished_at' => now()])->save();
         } catch (Throwable $e) {
             if ($activated) {
                 $this->autoRollback($project, $release, $deployment, $steps);

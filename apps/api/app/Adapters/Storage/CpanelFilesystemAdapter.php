@@ -56,6 +56,22 @@ class CpanelFilesystemAdapter implements StorageAdapter
         return $dest;
     }
 
+    public function deleteArtifact(string $storagePath): int
+    {
+        // Confine deletions to cPorter's own artifact store — never let a stray/crafted path
+        // reach the filesystem outside storage/app/artifacts/.
+        $root = rtrim(storage_path('app/artifacts'), '/').'/';
+        $real = realpath($storagePath);
+        if ($real === false || ! str_starts_with($real, $root)) {
+            return 0;
+        }
+
+        $freed = is_file($real) ? (filesize($real) ?: 0) : 0;
+        @unlink($real);
+
+        return $freed;
+    }
+
     public function extractZip(string $archivePath, string $destDir): void
     {
         if (! is_file($archivePath)) {

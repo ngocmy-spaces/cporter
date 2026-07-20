@@ -14,6 +14,14 @@ interface StorageAdapter
     /** Persist an uploaded artifact; returns the stored absolute path. */
     public function putArtifact(string $sourcePath, string $projectSlug): string;
 
+    /**
+     * Delete a stored artifact .zip (cPorter's own internal storage, not a jailed project path)
+     * once it is no longer needed — the deploy is stable and rollback never re-extracts it.
+     *
+     * @return int bytes freed (0 if the file was already gone), best-effort.
+     */
+    public function deleteArtifact(string $storagePath): int;
+
     /** Extract a .zip into $destDir (Zip-Slip safe). */
     public function extractZip(string $archivePath, string $destDir): void;
 

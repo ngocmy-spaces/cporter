@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Audit\AuditLogger;
 use App\Domain\Deploy\EnvFileRenderer;
+use App\Domain\Deploy\ReleasePruner;
 use App\Domain\Storage\PathJail;
 use App\Enums\ProjectStatus;
 use App\Enums\ProjectType;
@@ -279,7 +280,7 @@ class ProjectController extends Controller
      * Identity/location fields (`slug`, `base_path`, `type`) are frozen once physical releases
      * exist, since `releases/` and the `current` symlink are anchored to them (docs/SPEC.md §20.5).
      */
-    public function update(Request $request, Project $project, PathJail $jail): JsonResponse
+    public function update(Request $request, Project $project, PathJail $jail, ReleasePruner $releasePruner): JsonResponse
     {
         $data = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
@@ -287,7 +288,7 @@ class ProjectController extends Controller
             'base_path' => ['sometimes', 'required', 'string', 'max:1024'],
             'type' => ['sometimes', 'required', Rule::enum(ProjectType::class)],
             'docroot_subpath' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'keep_releases' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:50'],
+            'keep_releases' => ['sometimes', 'required', 'integer', 'min:1', 'max:50'],
             'health_check_url' => ['sometimes', 'nullable', 'url'],
             'shared_paths' => ['sometimes', 'array'],
             'shared_paths.*' => [$this->sharedPathRule()],
@@ -316,9 +317,22 @@ class ProjectController extends Controller
             }
         }
 
+        // Lowering keep_releases prunes immediately (below). Never let that delete the live
+        // release — if it is older than the new window, make the user activate a newer one first.
+        if (array_key_exists('keep_releases', $data)) {
+            $this->assertKeepReleasesAllowed($project, (int) $data['keep_releases']);
+        }
+
         $project->fill($data);
         $changed = array_keys($project->getDirty());
         $project->save();
+
+        // Apply the new retention right away so the Releases list + disk match the setting, rather
+        // than waiting for the next deploy to prune.
+        if (in_array('keep_releases', $changed, true)) {
+            $releasePruner->prune($project, $project->keep_releases);
+            RecomputeDiskUsageJob::dispatch($project);
+        }
 
         app(AuditLogger::class)->record('project.updated', $project, [
             'slug' => $project->slug,
@@ -326,6 +340,32 @@ class ProjectController extends Controller
         ]);
 
         return response()->json(['data' => $project->fresh()]);
+    }
+
+    /**
+     * Guard a keep_releases decrease: the currently-active ("live") release must stay within the
+     * newest-N window, or pruning would strand the running site. Re-activatable releases are
+     * ordered newest-first (creation order, which matches on-disk mtime); if the live one falls
+     * outside the new keep, reject with actionable guidance.
+     */
+    private function assertKeepReleasesAllowed(Project $project, int $newKeep): void
+    {
+        $releases = $project->releases()
+            ->whereIn('state', [ReleaseState::Active->value, ReleaseState::Superseded->value])
+            ->orderByDesc('id')
+            ->get();
+
+        $activeIndex = $releases->search(fn ($r) => $r->state === ReleaseState::Active);
+        if ($activeIndex === false) {
+            return; // no live release to protect yet
+        }
+
+        if ($activeIndex >= $newKeep) {
+            throw ValidationException::withMessages([
+                'keep_releases' => 'The live release is the #'.($activeIndex + 1)." newest, so keeping only {$newKeep} "
+                    ."would delete it. Activate one of the {$newKeep} newest releases first, then lower keep_releases.",
+            ]);
+        }
     }
 
     /**

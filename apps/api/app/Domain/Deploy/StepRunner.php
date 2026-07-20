@@ -21,17 +21,20 @@ class StepRunner
         $this->steps = $deployment->steps ?? [];
     }
 
-    /** Run a step; record success/failure (with timing) and re-throw on error. */
+    /**
+     * Run a step; record success/failure (with timing) and re-throw on error. The callable may
+     * return a string to attach as the successful step's note (e.g. "Reclaimed 3 archives").
+     */
     public function run(string $name, callable $fn): void
     {
         $start = microtime(true);
         try {
-            $fn();
+            $note = $fn();
         } catch (Throwable $e) {
             $this->push($name, 'failed', $start, $e->getMessage());
             throw $e;
         }
-        $this->push($name, 'success', $start);
+        $this->push($name, 'success', $start, null, is_string($note) ? $note : null);
     }
 
     /** Record a step outcome that was evaluated elsewhere (e.g. a boolean health check). */

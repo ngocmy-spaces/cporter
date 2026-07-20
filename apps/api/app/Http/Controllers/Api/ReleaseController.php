@@ -6,6 +6,7 @@ use App\Domain\Audit\AuditLogger;
 use App\Domain\Deploy\DeployException;
 use App\Domain\Deploy\RollbackEngine;
 use App\Enums\DeploymentTrigger;
+use App\Enums\ReleaseState;
 use App\Http\Controllers\Controller;
 use App\Models\Project;
 use App\Models\Release;
@@ -19,10 +20,20 @@ class ReleaseController extends Controller
 {
     public function __construct(private readonly RollbackEngine $rollback) {}
 
+    /**
+     * Releases that still exist on disk and can be re-activated (live + prior). Pruned/failed/
+     * in-progress releases are omitted — they can't be rolled back to, so listing them only offers
+     * dead "Activate" buttons. Full history (including these) lives in the Deployments view. The
+     * result is naturally bounded by keep_releases (docs/SPEC.md §6, §8).
+     */
     public function index(Project $project): JsonResponse
     {
         return response()->json([
-            'data' => $project->releases()->with('artifact')->latest()->get(),
+            'data' => $project->releases()
+                ->with('artifact')
+                ->whereIn('state', [ReleaseState::Active->value, ReleaseState::Superseded->value])
+                ->latest()
+                ->get(),
         ]);
     }
 

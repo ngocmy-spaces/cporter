@@ -217,8 +217,8 @@ DB: cPanel's MySQL (or SQLite for a small deployment — **[ASSUMPTION B]** use 
 | **User** | id, name, email, password, role | Admin panel login. |
 | **ApiKey / Token** | id, name, prefix, hash, scopes[], project_id?, last_used_at, expires_at, revoked_at | Token for CI. Stores the **hash** (Sanctum-style), shows plaintext once. Scopes: `deploy`, `read`, `rollback`, `admin`. |
 | **Project** | id, name, slug, base_path, type(`laravel`\|`static`\|`php`\|`node`\|`wordpress`), docroot_subpath, keep_releases, health_check_url, hooks(json), shared_paths(json), env_vars(**encrypted** text — managed env vars), status(`active`\|`disabled`\|`deleting`), deleted_at, disk_usage, releases_disk_usage, disk_usage_status, disk_usage_calculated_at, shared_disk_usage(json — per-shared-path bytes) | Configuration for one managed domain. Soft-deleted (`deleted_at`); a `disabled` or `deleting` project rejects new deploys. Disk figures are recomputed by the deploy pipeline and the recompute endpoint (symlinks never followed, so shared data is counted once); `shared_disk_usage` breaks the shared total down per entry. **`env_vars`** is an ordered list of `{key,value}` stored **encrypted at rest** (Laravel `Crypt`, the app's only reversible-secret store); on deploy cPorter renders it into `shared/.env` (see §6, §9). Never serialized by `show`/`index` — read/written only via the admin-only `/projects/{slug}/env` endpoints (API.md). |
-| **Release** | id, project_id, ref/version, artifact_id, path, state(`pending`\|`extracting`\|`ready`\|`active`\|`superseded`\|`failed`), created_by, activated_at | One physical release. |
-| **Artifact** | id, project_id, filename, size, sha256, storage_path, uploaded_at, status | The build file from CI. |
+| **Release** | id, project_id, ref/version, artifact_id, path, state(`pending`\|`extracting`\|`ready`\|`active`\|`superseded`\|`failed`\|`pruned`), created_by, activated_at | One physical release. `pruned` = the directory was reclaimed by retention (keep_releases); the row is kept for history but can no longer be activated and is hidden from the releases list (§6, §8). |
+| **Artifact** | id, project_id, filename, size, sha256, storage_path, uploaded_at, status, pruned_at | The build file from CI. The `.zip` is consumed once (at extraction) and reclaimed after the deploy is stable: `storage_path` is nulled and `pruned_at` stamped, but the row is **kept** so size/sha256/filename remain for reporting (§6 step 15b, §11). |
 | **Deployment** | id, project_id, release_id, trigger(`api`\|`manual`\|`cron`), status(`queued`→`running`→`success`\|`failed`\|`rolled_back`), steps(json), started_at, finished_at, actor | One pipeline run. |
 | **AuditLog** | id, actor, action, subject, meta(json), ip, created_at | Who did what, when. |
 
@@ -245,8 +245,9 @@ Each step is written to `Deployment.steps[]` (name, status, duration, output/tai
 11. Activate Release    atomic symlink swap: create current.tmp -> releases/<id> then rename → current
 12. Post-activate Hooks (Laravel) queue:restart, opcache reset… → cron-worker. static/WP/PHP: skip
 13. Health Check        GET health_check_url (cURL); expect 2xx within N seconds. Fail → auto-rollback (§8)
-14. Prune               Delete old releases beyond keep_releases
+14. Prune               Delete old release dirs beyond keep_releases; mark the removed release rows `pruned` (DB kept in step with disk)
 15. Success             Release.state=active, Deployment.status=success (Laravel: after the cron hooks finish)
+15b. Post-deploy Tasks  Reclaim redundant artifact .zips — keep only the live release's on disk; DB rows are KEPT (size/sha256 for reporting), storage_path nulled + pruned_at stamped. Extensible, non-fatal flow (future notify/trigger tasks plug in here) — a task failure is recorded but never fails the deploy. See §11
 16. Release Lock        Delete deploy.lock (even on failure — finally)
 ```
 
@@ -301,6 +302,10 @@ Base: `https://cporter.domain/api/v1` · Auth: `Authorization: Bearer <token>`
   allow a manual hook. → **[ASSUMPTION C]** rollback = code-only.
 - **Auto-rollback**: if the Health Check step (13) fails after activation → automatically swap the symlink back to the old release,
   marking the deployment `rolled_back`.
+- **Rollback targets are code-only, on-disk releases**: rollback never re-extracts an artifact — it re-points `current` at an
+  existing release directory, so a reclaimed artifact `.zip` (§6 step 15b) does not affect it. Releases pruned by retention
+  (`pruned` state, directory gone) are **not** valid targets and are excluded from the releases list; only `active`/`superseded`
+  releases still on disk can be activated. A brand-new deploy always goes live regardless of a temporary rollback to an older release.
 
 ---
 
@@ -384,7 +389,8 @@ Which cron line depends on the host's minimum cadence — use **one** of:
 
 - **A — host allows a 1-minute cron:** `* * * * * … php artisan schedule:run`. The scheduler
   (`routes/console.php`) fans out to `cporter:run-jobs` (finalize Laravel deploys), `queue:work --stop-when-empty`
-  (artifact extraction), and `cporter:housekeep` (time out stuck deploys, release stale locks).
+  (artifact extraction), and `cporter:housekeep` (time out stuck deploys, release stale locks, and reclaim redundant
+  artifact `.zip`s project-wide — sparing the live release and any in-flight deploy's artifact).
 - **B — host caps cron at 5 minutes (common on cPanel):** `[every 5 min] … php artisan cporter:work`. Because a
   5-minutely `schedule:run` would make the `everyMinute` tasks 5-minutely too, `cporter:work` instead loops
   **in-process** for one cron cycle — each pass runs `run-jobs` + `queue:work` and periodically `housekeep`,
@@ -412,13 +418,19 @@ Interface (conceptual):
 ```
 StorageAdapter:
   putArtifact(stream) : path
+  deleteArtifact(path) : bytesFreed   # reclaim a stored .zip (confined to cPorter's own artifact store)
   extract(archive, destDir)        # PharData/ZipArchive, guard against zip-slip
   symlinkAtomic(target, linkPath)  # ln -sfn = symlink tmp + rename
   linkShared(release, sharedPaths)
-  pruneReleases(project, keep)
+  pruneReleases(project, keep)     # deletes dirs beyond keep, never the active one; returns removed ids
   writeLock(project) / removeLock(project)
   readCurrentTarget(project)
 ```
+
+**Retention services** wrap the raw adapter to keep the DB in step with the disk:
+- **ReleasePruner** calls `pruneReleases` and marks the removed release rows `pruned` (used by every deploy's prune step and by lowering `keep_releases`, which prunes immediately).
+- **ArtifactPruner** reclaims artifact `.zip`s via `deleteArtifact`, keeping only the live release's (plus any in-flight deploy's / not-yet-attached upload); it nulls `storage_path` + stamps `pruned_at` but never deletes the row. Run by the post-deploy task (§6 step 15b) and the housekeeper (§10).
+- **Post-deploy tasks** (`config('cporter.post_deploy_tasks')`) run after a successful deploy; each is container-resolved and isolated (a failure is recorded, never fails the deploy), so notify/webhook tasks can be added without touching the pipeline.
 
 **Jail / path security**: every operation is only permitted within the `allowed_base_paths` list
 (the `Project.base_path` entries + cPorter's own storage). Normalize with `realpath` and reject anything that escapes the jail
@@ -629,7 +641,8 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 ### 20.5 Domain model (§5)
 | Kind | Item | Reality |
 |---|---|---|
-| D | Enums grew | `Deployment.status` adds `hooks_pending`; `Deployment.trigger` adds `webhook`; `Project.type` adds `wordpress`; `Project.status` adds `deleting` (transient: a disk purge is running; the row is soft-deleted once it finishes). |
+| D | Enums grew | `Deployment.status` adds `hooks_pending`; `Deployment.trigger` adds `webhook`; `Project.type` adds `wordpress`; `Project.status` adds `deleting` (transient: a disk purge is running; the row is soft-deleted once it finishes); `Release.state` adds `pruned` (directory reclaimed by retention; row kept for history, hidden from the releases list). |
+| D | Artifact retention | `Artifact` gains `pruned_at`; the `.zip` is reclaimed after a stable deploy (keep only the live release's), nulling `storage_path` while keeping the row for reporting (§6 step 15b). Driven by a post-deploy task flow + the housekeeper (`ArtifactPruner`), gated by `CPORTER_PRUNE_ARTIFACTS`. Release retention now also marks pruned rows in the DB (`ReleasePruner`) and is applied immediately when `keep_releases` is lowered — which is blocked if it would strand the live release. |
 | D | Persisted fields | `Deployment.idempotency_key` is a real column with a unique `(project_id, idempotency_key)` index; a `settings` key/value table exists (probe/config). `Project` is **soft-deleted** (`deleted_at`) — a delete keeps deploy/audit history; disk reclamation is a separate opt-in (`PurgeProjectJob`). |
 | D | `Release`→`Artifact` | `artifact_id` is **nullable** (effectively `*—1 optional`, not strict `1—1`). |
 | D | `hooks` validation/normalization | `Project.hooks` is structurally validated (only `pre_activate`/`post_activate` stages; each a list of ≤1000-char command strings) and normalized on write (trim, drop blanks/empty stages → `{}`), mirroring `shared_paths`. Previously stored as a shapeless array. |

@@ -112,13 +112,13 @@ Used only by the SPA. **Not reachable with an API key** (session guard). Listed 
 | POST | `/projects` | admin | create a project (jail-validated `base_path`, which must not already be used by another project). Also scaffolds `releases/` + `shared/` and returns a `preflight` report alongside `data` (see below) |
 | POST | `/projects/{slug}/preflight` | admin | (re-)run host preflight: idempotently ensure `releases/` + `shared/`, probe symlink support, inspect `current`, flag missing shared files + the manual Document-Root step → `{ data: <report> }` |
 | POST | `/projects/{slug}/clone` | admin | duplicate the project's config into a new project. Body: `name`, `base_path` (required, jail-validated + unique), `slug?`. Copies type/docroot/keep_releases/health_check_url/shared_paths/hooks/env_vars; **no** releases/deployments are copied; the clone starts `active`. Same `{ data, preflight }` + `201` as create |
-| PATCH | `/projects/{slug}` | admin | update project config; `status: disabled` blocks new deploys. `slug`/`base_path`/`type` are frozen once releases exist |
+| PATCH | `/projects/{slug}` | admin | update project config; `status: disabled` blocks new deploys. `slug`/`base_path`/`type` are frozen once releases exist. `keep_releases` (≥1) is enforced immediately — lowering it prunes surplus releases at once, and is rejected `422` if it would delete the currently-live release (activate a newer one first) |
 | DELETE | `/projects/{slug}` | admin | soft-delete a project. Body `purge`: `none` (default — hide only, files kept, `200`) · `releases` (drop releases/ + `current`, keep shared/) · `all` (delete the whole base_path). A purge runs async: the project goes `deleting` (deploys blocked) and is hidden when done → `202` |
 | GET | `/projects/{slug}/env` | admin | read managed env vars (decrypted) + the `shared/.env` file state → `{ data: { vars, file } }`. **Admin-only** (secrets) — never in `show`/`index` |
 | PUT | `/projects/{slug}/env` | admin | replace the managed env vars. Body `env_vars: [{key,value}]` (keys `^[A-Za-z_][A-Za-z0-9_]*$`, unique, ≤255; value ≤32768). Stored encrypted; rendered to `shared/.env` on the next deploy → `{ data: { vars, file } }` |
 | POST | `/projects/{slug}/env/adopt` | admin | force-write `shared/.env` from the current env vars, taking over a hand-created (unmanaged) file (stamps the managed marker). Does not redeploy → `{ data: { vars, file }, message }` |
 | POST | `/projects/{slug}/disk-usage/recompute` | admin | recompute the on-disk footprint off-request; returns the project and sets `disk_usage_status: running` to poll. Idempotent while a run is in flight (unless >10 min stale) → `202` |
-| GET | `/projects/{slug}/deployments` · `/projects/{slug}/releases` | read | per-project history |
+| GET | `/projects/{slug}/deployments` · `/projects/{slug}/releases` | read | per-project history. `releases` returns only re-activatable releases (`active`/`superseded`, still on disk) — bounded by `keep_releases`; `pruned`/`failed` ones are omitted (full history is in `deployments`) |
 | GET | `/projects/{slug}/activity` | read | project-scoped audit feed (create/update/preflight/delete…), newest first, `?action=` filter, capped at 200 |
 | GET | `/deployments` · `/deployments/{id}` | read | recent + detail |
 | POST | `/releases/{id}/activate` | admin | activate a release (rollback-from-UI) |
@@ -262,7 +262,12 @@ Shape returned by deployment endpoints (see `packages/sdk/src/types.ts` for the 
 
 **Step shape:** each `steps[]` entry is `{ name, status, duration_ms, error?, note? }`. `status` is
 `success` | `failed` | `warning`. A `warning` is non-fatal (the deploy continues) and carries a `note`
-— e.g. `write_env` skipping a hand-created, unmanaged `shared/.env`.
+— e.g. `write_env` skipping a hand-created, unmanaged `shared/.env`. A successful step may also carry a
+`note` — e.g. the post-deploy `prune_artifacts` step reports how many artifact archives it reclaimed.
+
+**Artifact reclaim:** after a successful deploy, redundant artifact `.zip`s are deleted from disk (only the
+live release's is kept). The `Artifact` DB row persists for reporting — its `storage_path` becomes `null` and
+`pruned_at` is set once the file is gone (a release's `artifact.size`/`sha256` stay available). See SPEC §6 step 15b.
 
 ---
 

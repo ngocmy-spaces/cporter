@@ -1,5 +1,7 @@
 <?php
 
+use App\Domain\Deploy\PostDeploy\PruneArtifactsTask;
+
 /*
 | cPorter core configuration (docs/SPEC.md §9, §11, §12, §16).
 | Runtime capabilities are probed and stored separately (Settings); this file holds
@@ -40,6 +42,17 @@ return [
         'max_files' => (int) env('CPORTER_ARTIFACT_MAX_FILES', 50000),
         // Zip-bomb guard: reject archives whose total uncompressed size exceeds this.
         'max_uncompressed_bytes' => (int) env('CPORTER_ARTIFACT_MAX_UNCOMPRESSED_BYTES', 1024 * 1024 * 1024),
+        // Reclaim an artifact's .zip once its deploy is stable (the zip is never re-read —
+        // rollback re-points `current` at an existing release dir). DB rows are always kept.
+        // Set false to retain every zip on disk.
+        'prune_after_deploy' => filter_var(env('CPORTER_PRUNE_ARTIFACTS', true), FILTER_VALIDATE_BOOL),
+    ],
+
+    // Ordered tasks run after a successful deploy (docs/SPEC.md §6). Each is resolved from the
+    // container and isolated — a failing task is recorded but never fails the deploy. Add
+    // notification/webhook tasks here as they ship.
+    'post_deploy_tasks' => [
+        PruneArtifactsTask::class,
     ],
 
     // Health check defaults.
