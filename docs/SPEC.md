@@ -367,6 +367,11 @@ Web request (deploy Laravel)                 Standing cron (every ~1 minute)
 cPorter runs a probe and stores it in Settings, displaying it in the Admin panel: is `symlink` runtime OK?, is `ZipArchive` OK?,
 `proc_open` (web & CLI) OK?, write permission on each `base_path`, disk space, PHP version, whether cron is configured.
 
+**Hook-binary detection.** The web probe can only PATH-scan for hook CLIs (php/composer/node/npm/python3) since web PHP has no
+`proc_open`. The authoritative result comes from `cporter:probe-binaries`, run by the scheduler/worker in the cron shell: it uses
+`command -v` — the exact PATH hooks run with — and caches `{name → path}` in Settings (self-throttled ~6h). `/system/capabilities`
+overlays it (`binaries_source` = `cron` when present, else `path-scan` fallback).
+
 > **Roadmap consequence:** because static/WP/PHP can be deployed **entirely without a shell**, the MVP (Phase 1) does this group
 > first; Laravel + cron-worker come in Phase 2 (§18).
 

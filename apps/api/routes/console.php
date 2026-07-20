@@ -34,3 +34,6 @@ Schedule::command('queue:work --stop-when-empty --max-time=50')->everyMinute()->
 
 // Fail timed-out deployments and release stale locks.
 Schedule::command('cporter:housekeep')->everyFiveMinutes()->withoutOverlapping();
+
+// Detect deploy-hook binaries in the cron shell (self-throttled to ~6h; the command no-ops when fresh).
+Schedule::command('cporter:probe-binaries')->hourly()->withoutOverlapping();

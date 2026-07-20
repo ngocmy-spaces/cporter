@@ -183,8 +183,12 @@ export interface Capabilities {
   open_basedir: string | null;
   extensions: Record<string, boolean>;
   functions: Record<string, boolean>;
-  /** External CLIs a deploy hook might call: name → resolved path (null = not found on $PATH). */
+  /** External CLIs a deploy hook might call: name → resolved path (null = not found). */
   binaries: Record<string, string | null>;
+  /** 'cron' = probed via `command -v` in the shell hooks run in (authoritative); 'path-scan' = web PATH fallback. */
+  binaries_source: 'cron' | 'path-scan';
+  /** When the cron-worker last probed binaries; null until it has run once. */
+  binaries_detected_at: string | null;
   symlink_runtime: boolean;
   limits: CapabilityLimits;
   disk: CapabilityDisk;

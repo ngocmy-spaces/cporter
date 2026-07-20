@@ -173,7 +173,9 @@ For each site cPorter will deploy, set that domain's **Document Root**:
      hooks `pre_activate=["php artisan migrate --force","php artisan config:cache"]`,
      `post_activate=["php artisan queue:restart"]`
      (each hook is a full shell command — use the interpreter path you need, e.g.
-     `/opt/cpanel/ea-php83/root/usr/bin/php artisan migrate`; the **System** page lists detected binaries)
+     `/opt/cpanel/ea-php83/root/usr/bin/php artisan migrate`; the **System** page lists detected binaries —
+     probed in the cron shell via `command -v` by `cporter:probe-binaries` (run automatically by the
+     scheduler/worker, no extra cron needed), so it reflects the exact PATH your hooks run with)
    - `health_check_url=https://<site>.domain/up` (Laravel has `/up`; static: any 200 URL)
 2. **API Keys ▸ New key** (scope `deploy`, `read`, optionally `rollback`) → copy the token.
 3. Deploy from CI or Postman:

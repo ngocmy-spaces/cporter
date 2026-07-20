@@ -28,13 +28,38 @@ class SystemController extends Controller
             $payload = $this->probeAndStore($probe);
         }
 
-        return $this->respond($payload);
+        return $this->respond($this->withShellBinaries($payload));
     }
 
     /** Force a fresh probe and persist it. */
     public function refreshCapabilities(CapabilityProbe $probe): JsonResponse
     {
-        return $this->respond($this->probeAndStore($probe));
+        return $this->respond($this->withShellBinaries($this->probeAndStore($probe)));
+    }
+
+    /**
+     * Overlay the cron-worker's shell-probed binaries (docs/SPEC.md §9) onto the web payload. The
+     * cron result (`command -v` in the shell where hooks actually run) is authoritative; the web
+     * PATH-scan in `result.binaries` is only a fallback until the worker has probed. Adds
+     * `binaries_source` ('cron' | 'path-scan') and `binaries_detected_at` so the UI can be honest
+     * about which one it's showing.
+     *
+     * @param  array{result: array<string, mixed>, probed_at: string}  $payload
+     * @return array{result: array<string, mixed>, probed_at: string}
+     */
+    private function withShellBinaries(array $payload): array
+    {
+        $payload['result']['binaries_source'] = 'path-scan';
+        $payload['result']['binaries_detected_at'] = null;
+
+        $shell = Setting::read('binaries');
+        if (is_array($shell) && is_array($shell['result'] ?? null)) {
+            $payload['result']['binaries'] = $shell['result'];
+            $payload['result']['binaries_source'] = 'cron';
+            $payload['result']['binaries_detected_at'] = $shell['detected_at'] ?? null;
+        }
+
+        return $payload;
     }
 
     /** Cron liveness + cadence mode from the heartbeat store (docs/SPEC.md §10). */

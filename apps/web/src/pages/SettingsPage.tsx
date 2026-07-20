@@ -123,13 +123,26 @@ export function SettingsPage() {
             </SimpleGrid>
 
             <Card withBorder radius="md" p="md">
-              <Text fw={600} mb={4}>
-                Detected binaries
-              </Text>
+              <Group justify="space-between" mb={4}>
+                <Text fw={600}>Detected binaries</Text>
+                <Badge variant="light" color={result.binaries_source === 'cron' ? 'green' : 'yellow'}>
+                  {result.binaries_source === 'cron' ? 'cron shell' : 'PATH scan'}
+                </Badge>
+              </Group>
               <Text c="dimmed" size="xs" mb="sm">
-                CLIs found on the web server&apos;s <Code>$PATH</Code>, for use in deploy hooks. The
-                cron shell that actually runs hooks may resolve a different PATH — treat this as a
-                hint, not a guarantee.
+                {result.binaries_source === 'cron' ? (
+                  <>
+                    Detected in the cron shell via <Code>command -v</Code> — the exact PATH hooks run
+                    with, so this is authoritative. Probed{' '}
+                    {formatRelativeTime(result.binaries_detected_at)}.
+                  </>
+                ) : (
+                  <>
+                    Fallback scan of the web server&apos;s <Code>$PATH</Code> — the cron shell that
+                    runs hooks may differ, so treat this as a hint. It becomes authoritative once the
+                    cron-worker runs (<Code>cporter:probe-binaries</Code>).
+                  </>
+                )}
               </Text>
               {Object.keys(result.binaries ?? {}).length === 0 ? (
                 <Text c="dimmed" size="sm">

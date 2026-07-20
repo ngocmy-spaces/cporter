@@ -70,6 +70,8 @@ class Work extends Command
 
                 if ($housekeepEvery > 0 && time() >= $nextHousekeep) {
                     $this->tick('cporter:housekeep', []);
+                    // Refresh hook-binary detection in the shell context (self-throttled to ~6h).
+                    $this->tick('cporter:probe-binaries', []);
                     $nextHousekeep = time() + $housekeepEvery;
                 }
 

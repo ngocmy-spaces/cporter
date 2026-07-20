@@ -189,7 +189,9 @@ ordered list of shell-command strings. Exactly two stages are recognised; any ot
 Each command runs **verbatim** as a raw shell command in the release directory (cwd), 600s timeout, on the
 cron worker (§SPEC 9). Include the interpreter yourself — e.g. `php artisan …`,
 `/opt/cpanel/ea-php83/root/usr/bin/php artisan …`, `composer install --no-dev`, or `npm run build`. The
-`/system/capabilities` endpoint reports which binaries the host detects. The server trims commands and drops
+`/system/capabilities` endpoint reports which binaries the host detects — `binaries` (name → path/null) plus
+`binaries_source` (`cron` once the worker has run `command -v` in the shell hooks use, else `path-scan` fallback)
+and `binaries_detected_at`. The server trims commands and drops
 blanks/empty stages, so an all-empty `hooks` persists as `{}`.
 
 ### Environment variables

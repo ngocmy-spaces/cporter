@@ -2,6 +2,7 @@
 
 namespace App\Domain\System;
 
+use App\Adapters\Command\CommandRunner;
 use Illuminate\Support\Collection;
 
 /**
@@ -10,6 +11,9 @@ use Illuminate\Support\Collection;
  */
 class CapabilityProbe
 {
+    /** External CLIs a deploy hook might invoke (docs/SPEC.md §9). */
+    public const BINARIES = ['php', 'composer', 'node', 'npm', 'python3'];
+
     /**
      * @return array<string, mixed>
      */
@@ -64,17 +68,15 @@ class CapabilityProbe
     }
 
     /**
-     * Best-effort detection of external CLIs a deploy hook might invoke (docs/SPEC.md §9). Web PHP
-     * has no proc_open, so instead of `command -v` we scan $PATH (plus common cPanel bin dirs) for
-     * an executable of each name. NOTE: the cron shell that actually runs hooks may have a different
-     * PATH, so treat a hit as a hint, not a guarantee — surfaced in the Admin "System" view.
+     * Fallback detection of hook CLIs from *web PHP* (docs/SPEC.md §9): web has no proc_open, so
+     * instead of `command -v` we scan $PATH (plus common cPanel bin dirs) for an executable of each
+     * name. The cron shell that actually runs hooks may resolve a different PATH, so this is only a
+     * hint — the authoritative result comes from {@see binariesViaShell()}, run by the cron-worker.
      *
      * @return array<string, string|null> binary name => resolved absolute path (null if not found)
      */
     private function binaries(): array
     {
-        $names = ['php', 'composer', 'node', 'npm', 'python3'];
-
         $path = array_filter(explode(PATH_SEPARATOR, (string) getenv('PATH')));
         $dirs = array_values(array_unique([
             ...$path,
@@ -85,7 +87,7 @@ class CapabilityProbe
         ]));
 
         $out = [];
-        foreach ($names as $name) {
+        foreach (self::BINARIES as $name) {
             $out[$name] = null;
             foreach ($dirs as $dir) {
                 $candidate = rtrim($dir, '/').'/'.$name;
@@ -94,6 +96,26 @@ class CapabilityProbe
                     break;
                 }
             }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Authoritative detection of hook CLIs from the *cron shell* (docs/SPEC.md §9), where hooks
+     * actually run. Uses `command -v <name>` — the same PATH resolution the hook itself sees — so a
+     * hit here is a real guarantee, not a filesystem guess. Callable only where proc_open works
+     * (the cron-worker); the caller must check {@see CommandRunner::isAvailable()} first.
+     *
+     * @return array<string, string|null> binary name => resolved path (null if not on the shell PATH)
+     */
+    public function binariesViaShell(CommandRunner $runner): array
+    {
+        $out = [];
+        foreach (self::BINARIES as $name) {
+            $result = $runner->run('command -v '.escapeshellarg($name), base_path(), [], 10);
+            $path = trim($result->output);
+            $out[$name] = ($result->ok() && $path !== '') ? $path : null;
         }
 
         return $out;
