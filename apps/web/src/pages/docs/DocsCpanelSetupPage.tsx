@@ -206,8 +206,8 @@ export function DocsCpanelSetupPage() {
           <List.Item>
             In the cPorter UI → <Badge variant="light">Projects ▸ New project</Badge>: set{' '}
             <code>base_path=/home/USER/&lt;site&gt;.domain</code>, <code>type</code>, and (for Laravel){' '}
-            <code>docroot_subpath=public</code>, <code>shared_paths=[".env","storage"]</code>,{' '}
-            <code>php_binary</code>, and hooks.
+            <code>docroot_subpath=public</code>, <code>shared_paths=[".env","storage"]</code>, and
+            hooks (each hook is a full shell command, e.g. <code>php artisan migrate --force</code>).
           </List.Item>
           <List.Item>
             <Badge variant="light">API Keys ▸ New key</Badge> with the <code>deploy</code> +{' '}

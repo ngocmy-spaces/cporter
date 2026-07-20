@@ -21,6 +21,7 @@ class CapabilityProbe
             'open_basedir' => ((string) ini_get('open_basedir')) ?: null,
             'extensions' => $this->flags(['zip', 'curl', 'openssl', 'phar', 'mbstring', 'pdo_mysql'], 'extension_loaded'),
             'functions' => $this->functions(['proc_open', 'exec', 'symlink', 'readlink']),
+            'binaries' => $this->binaries(),
             'symlink_runtime' => $this->testSymlink(),
             'limits' => [
                 'upload_max_filesize' => ini_get('upload_max_filesize'),
@@ -60,6 +61,42 @@ class CapabilityProbe
         return (new Collection($names))
             ->mapWithKeys(fn (string $n) => [$n => function_exists($n) && ! in_array($n, $disabled, true)])
             ->all();
+    }
+
+    /**
+     * Best-effort detection of external CLIs a deploy hook might invoke (docs/SPEC.md §9). Web PHP
+     * has no proc_open, so instead of `command -v` we scan $PATH (plus common cPanel bin dirs) for
+     * an executable of each name. NOTE: the cron shell that actually runs hooks may have a different
+     * PATH, so treat a hit as a hint, not a guarantee — surfaced in the Admin "System" view.
+     *
+     * @return array<string, string|null> binary name => resolved absolute path (null if not found)
+     */
+    private function binaries(): array
+    {
+        $names = ['php', 'composer', 'node', 'npm', 'python3'];
+
+        $path = array_filter(explode(PATH_SEPARATOR, (string) getenv('PATH')));
+        $dirs = array_values(array_unique([
+            ...$path,
+            '/usr/local/bin',
+            '/usr/bin',
+            '/bin',
+            '/opt/cpanel/composer/bin',
+        ]));
+
+        $out = [];
+        foreach ($names as $name) {
+            $out[$name] = null;
+            foreach ($dirs as $dir) {
+                $candidate = rtrim($dir, '/').'/'.$name;
+                if (@is_file($candidate) && @is_executable($candidate)) {
+                    $out[$name] = $candidate;
+                    break;
+                }
+            }
+        }
+
+        return $out;
     }
 
     private function testSymlink(): bool

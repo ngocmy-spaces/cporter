@@ -116,7 +116,6 @@ class ProjectController extends Controller
             'base_path' => ['required', 'string', 'max:1024'],
             'type' => ['required', Rule::enum(ProjectType::class)],
             'docroot_subpath' => ['nullable', 'string', 'max:255'],
-            'php_binary' => ['nullable', 'string', 'max:255'],
             'keep_releases' => ['nullable', 'integer', 'min:1', 'max:50'],
             'health_check_url' => ['nullable', 'url'],
             'shared_paths' => ['array'],
@@ -131,7 +130,7 @@ class ProjectController extends Controller
 
     /**
      * Duplicate an existing project's configuration into a new project (docs/SPEC.md §5). Copies
-     * type/docroot/php_binary/keep_releases/health_check_url/shared_paths/hooks/env_vars; the caller supplies
+     * type/docroot/keep_releases/health_check_url/shared_paths/hooks/env_vars; the caller supplies
      * a new name + base_path (+ optional slug). No releases/deployments/artifacts are copied — the
      * clone is a fresh project that starts `active` with no live release until its first deploy.
      * `shared_paths` of type `file` are copied as config; their contents are NOT — preflight will
@@ -151,7 +150,6 @@ class ProjectController extends Controller
             'base_path' => $input['base_path'],
             'type' => $project->type,
             'docroot_subpath' => $project->docroot_subpath,
-            'php_binary' => $project->php_binary,
             'keep_releases' => $project->keep_releases,
             'health_check_url' => $project->health_check_url,
             'shared_paths' => $project->shared_paths,
@@ -289,7 +287,6 @@ class ProjectController extends Controller
             'base_path' => ['sometimes', 'required', 'string', 'max:1024'],
             'type' => ['sometimes', 'required', Rule::enum(ProjectType::class)],
             'docroot_subpath' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'php_binary' => ['sometimes', 'nullable', 'string', 'max:255'],
             'keep_releases' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:50'],
             'health_check_url' => ['sometimes', 'nullable', 'url'],
             'shared_paths' => ['sometimes', 'array'],
@@ -508,7 +505,8 @@ class ProjectController extends Controller
      * `hooks` is an object keyed by deploy stage → ordered list of command strings
      * (docs/SPEC.md §9, §16). Only the stages the engine actually runs are allowed
      * ({@see Project::HOOK_STAGES}: pre_activate, post_activate); each command is a raw
-     * shell string (an `artisan …` command is auto-prefixed with the project's php_binary).
+     * shell string run verbatim in the release dir (e.g. `php artisan migrate --force`,
+     * `/usr/bin/ea-php83 artisan migrate`, `composer install --no-dev`, `npm run build`).
      * The model normalizes (trims, drops blanks) before persisting — this rule guards shape.
      */
     private function hooksRule(): \Closure

@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Card, Group, List, SimpleGrid, Skeleton, Stack, Text, ThemeIcon, Title } from '@mantine/core';
+import { Alert, Badge, Button, Card, Code, Group, List, SimpleGrid, Skeleton, Stack, Text, ThemeIcon, Title } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { IconCheck, IconRefresh, IconX } from '@tabler/icons-react';
 import { PanelBody } from '@/components/PanelBody';
@@ -121,6 +121,36 @@ export function SettingsPage() {
                 <FlagList flags={result.functions} />
               </Card>
             </SimpleGrid>
+
+            <Card withBorder radius="md" p="md">
+              <Text fw={600} mb={4}>
+                Detected binaries
+              </Text>
+              <Text c="dimmed" size="xs" mb="sm">
+                CLIs found on the web server&apos;s <Code>$PATH</Code>, for use in deploy hooks. The
+                cron shell that actually runs hooks may resolve a different PATH — treat this as a
+                hint, not a guarantee.
+              </Text>
+              <List spacing={8} size="sm" center>
+                {Object.entries(result.binaries).map(([name, path]) => (
+                  <List.Item
+                    key={name}
+                    icon={
+                      <ThemeIcon color={path ? 'green' : 'red'} size={18} radius="xl" variant="light">
+                        {path ? <IconCheck size={12} /> : <IconX size={12} />}
+                      </ThemeIcon>
+                    }
+                  >
+                    <Group gap="xs" wrap="nowrap">
+                      <Text size="sm" fw={500} w={80}>
+                        {name}
+                      </Text>
+                      {path ? <Code>{path}</Code> : <Text size="sm" c="dimmed">not found</Text>}
+                    </Group>
+                  </List.Item>
+                ))}
+              </List>
+            </Card>
 
             <Card withBorder radius="md" p="md">
               <Text fw={600} mb="xs">

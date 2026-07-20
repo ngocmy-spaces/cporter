@@ -29,7 +29,6 @@ class Project extends Model
         'base_path',
         'type',
         'docroot_subpath',
-        'php_binary',
         'keep_releases',
         'disk_usage',
         'releases_disk_usage',

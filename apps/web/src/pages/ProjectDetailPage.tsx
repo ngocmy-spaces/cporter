@@ -91,13 +91,13 @@ const HOOK_STAGES = [
     key: 'pre_activate' as const,
     label: 'Pre-activate hooks',
     helper:
-      'Run before the new release goes live (e.g. artisan migrate --force). If one fails, the deploy fails and nothing is swapped.',
+      'Run before the new release goes live (e.g. php artisan migrate --force). If one fails, the deploy fails and nothing is swapped.',
   },
   {
     key: 'post_activate' as const,
     label: 'Post-activate hooks',
     helper:
-      'Run after the release is live (e.g. artisan queue:restart). If one fails, cPorter auto-rolls back to the previous release.',
+      'Run after the release is live (e.g. php artisan queue:restart). If one fails, cPorter auto-rolls back to the previous release.',
   },
 ];
 
@@ -165,7 +165,6 @@ interface ProjectEditFormValues {
   name: string;
   type: string;
   docroot_subpath: string;
-  php_binary: string;
   keep_releases: number;
   health_check_url: string;
   shared_paths: SharedPath[];
@@ -176,7 +175,6 @@ const EDIT_INITIAL_VALUES: ProjectEditFormValues = {
   name: '',
   type: 'static',
   docroot_subpath: '',
-  php_binary: '',
   keep_releases: 5,
   health_check_url: '',
   shared_paths: [],
@@ -372,7 +370,6 @@ export function ProjectDetailPage() {
         name: values.name,
         type: values.type,
         docroot_subpath: values.docroot_subpath || null,
-        php_binary: values.php_binary || null,
         keep_releases: values.keep_releases,
         health_check_url: values.health_check_url || null,
         shared_paths: values.shared_paths
@@ -556,7 +553,6 @@ export function ProjectDetailPage() {
       name: p.name,
       type: p.type,
       docroot_subpath: p.docroot_subpath ?? '',
-      php_binary: p.php_binary ?? '',
       keep_releases: p.keep_releases,
       health_check_url: p.health_check_url ?? '',
       shared_paths: p.shared_paths ?? [],
@@ -759,9 +755,6 @@ export function ProjectDetailPage() {
                   ? `updated ${formatRelativeTime(p.disk_usage_calculated_at)}`
                   : 'not calculated yet'}
               </Text>
-            </Info>
-            <Info label="PHP binary">
-              <Text size="sm">{p.php_binary || '—'}</Text>
             </Info>
             <Info label="Created">
               <Text size="sm">{formatDateTime(p.created_at)}</Text>
@@ -1016,12 +1009,6 @@ export function ProjectDetailPage() {
               }
               {...editForm.getInputProps('docroot_subpath')}
             />
-            <TextInput
-              label="PHP binary"
-              placeholder="/usr/bin/php8.2"
-              description="Override the PHP binary used for shell steps (migrate, artisan, npm build). Leave empty to use the server default."
-              {...editForm.getInputProps('php_binary')}
-            />
             <NumberInput
               label="Keep releases"
               description="How many past releases to retain for rollback before older ones are pruned."
@@ -1077,9 +1064,12 @@ export function ProjectDetailPage() {
             </Stack>
             <Stack gap="sm">
               <Text size="xs" c="dimmed">
-                Commands run on the cron worker — mainly for Laravel/Node projects.{' '}
-                <Code>artisan …</Code> commands use the project&apos;s PHP binary; anything else runs as
-                a raw shell command in the release directory.
+                Commands run verbatim on the cron worker, in the release directory — mainly for
+                Laravel/Node projects. Include the interpreter yourself, e.g.{' '}
+                <Code>php artisan migrate --force</Code>,{' '}
+                <Code>/opt/cpanel/ea-php83/root/usr/bin/php artisan migrate</Code>,{' '}
+                <Code>composer install --no-dev</Code>, or <Code>npm run build</Code>. Check the{' '}
+                <b>System</b> page to see which binaries the host detects.
               </Text>
               {HOOK_STAGES.map((stage) => (
                 <Stack gap="xs" key={stage.key}>
@@ -1092,7 +1082,7 @@ export function ProjectDetailPage() {
                   {editForm.values.hooks[stage.key].map((_, index) => (
                     <Group key={index} gap="xs" align="flex-start">
                       <TextInput
-                        placeholder="artisan migrate --force"
+                        placeholder="php artisan migrate --force"
                         style={{ flex: 1 }}
                         {...editForm.getInputProps(`hooks.${stage.key}.${index}`)}
                       />

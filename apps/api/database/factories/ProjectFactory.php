@@ -29,7 +29,6 @@ class ProjectFactory extends Factory
             'base_path' => "/home/user/{$slug}.domain",
             'type' => ProjectType::StaticSite,
             'docroot_subpath' => null,
-            'php_binary' => null,
             'keep_releases' => 5,
             'health_check_url' => "https://{$slug}.domain/",
             'shared_paths' => [],
@@ -44,9 +43,8 @@ class ProjectFactory extends Factory
         return $this->state(fn () => [
             'type' => ProjectType::Laravel,
             'docroot_subpath' => 'public',
-            'php_binary' => '/opt/cpanel/ea-php83/root/usr/bin/php',
             'shared_paths' => ['.env', 'storage'],
-            'hooks' => ['pre_activate' => ['artisan migrate --force', 'artisan config:cache']],
+            'hooks' => ['pre_activate' => ['php artisan migrate --force', 'php artisan config:cache']],
         ]);
     }
 }

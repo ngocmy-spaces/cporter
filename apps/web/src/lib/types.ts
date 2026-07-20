@@ -70,7 +70,6 @@ export interface Project {
   base_path: string;
   type: ProjectType;
   docroot_subpath: string | null;
-  php_binary: string | null;
   keep_releases: number;
   /** Live footprint in bytes: active release (`current`) + shared/. */
   disk_usage: number;
@@ -184,6 +183,8 @@ export interface Capabilities {
   open_basedir: string | null;
   extensions: Record<string, boolean>;
   functions: Record<string, boolean>;
+  /** External CLIs a deploy hook might call: name → resolved path (null = not found on $PATH). */
+  binaries: Record<string, string | null>;
   symlink_runtime: boolean;
   limits: CapabilityLimits;
   disk: CapabilityDisk;

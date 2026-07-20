@@ -111,7 +111,7 @@ Used only by the SPA. **Not reachable with an API key** (session guard). Listed 
 | GET | `/projects` · `/projects/{slug}` | read | list / show projects. `?search=` + `?status=active\|disabled\|deleting` filter; `?page=`/`?per_page=` (≤100) switch to a paginated `{data, meta}` envelope, else the full list. **Show** also embeds `active_release` (`{id,version,activated_at}`) and `last_deployment` (`{id,status,created_at}`) summaries (or `null`) so the detail page can lazy-load the per-tab lists |
 | POST | `/projects` | admin | create a project (jail-validated `base_path`, which must not already be used by another project). Also scaffolds `releases/` + `shared/` and returns a `preflight` report alongside `data` (see below) |
 | POST | `/projects/{slug}/preflight` | admin | (re-)run host preflight: idempotently ensure `releases/` + `shared/`, probe symlink support, inspect `current`, flag missing shared files + the manual Document-Root step → `{ data: <report> }` |
-| POST | `/projects/{slug}/clone` | admin | duplicate the project's config into a new project. Body: `name`, `base_path` (required, jail-validated + unique), `slug?`. Copies type/docroot/php_binary/keep_releases/health_check_url/shared_paths/hooks/env_vars; **no** releases/deployments are copied; the clone starts `active`. Same `{ data, preflight }` + `201` as create |
+| POST | `/projects/{slug}/clone` | admin | duplicate the project's config into a new project. Body: `name`, `base_path` (required, jail-validated + unique), `slug?`. Copies type/docroot/keep_releases/health_check_url/shared_paths/hooks/env_vars; **no** releases/deployments are copied; the clone starts `active`. Same `{ data, preflight }` + `201` as create |
 | PATCH | `/projects/{slug}` | admin | update project config; `status: disabled` blocks new deploys. `slug`/`base_path`/`type` are frozen once releases exist |
 | DELETE | `/projects/{slug}` | admin | soft-delete a project. Body `purge`: `none` (default — hide only, files kept, `200`) · `releases` (drop releases/ + `current`, keep shared/) · `all` (delete the whole base_path). A purge runs async: the project goes `deleting` (deploys blocked) and is hidden when done → `202` |
 | GET | `/projects/{slug}/env` | admin | read managed env vars (decrypted) + the `shared/.env` file state → `{ data: { vars, file } }`. **Admin-only** (secrets) — never in `show`/`index` |
@@ -183,12 +183,14 @@ ordered list of shell-command strings. Exactly two stages are recognised; any ot
 | `post_activate` | after activation | auto-rollback to the previous release |
 
 ```json
-"hooks": { "pre_activate": ["artisan migrate --force"], "post_activate": ["artisan queue:restart"] }
+"hooks": { "pre_activate": ["php artisan migrate --force"], "post_activate": ["php artisan queue:restart"] }
 ```
 
-A command starting with `artisan ` is prefixed with the project's `php_binary` (default `php`); any other
-string runs as a raw shell command in the release directory (cwd), 600s timeout, on the cron worker (§SPEC 9).
-The server trims commands and drops blanks/empty stages, so an all-empty `hooks` persists as `{}`.
+Each command runs **verbatim** as a raw shell command in the release directory (cwd), 600s timeout, on the
+cron worker (§SPEC 9). Include the interpreter yourself — e.g. `php artisan …`,
+`/opt/cpanel/ea-php83/root/usr/bin/php artisan …`, `composer install --no-dev`, or `npm run build`. The
+`/system/capabilities` endpoint reports which binaries the host detects. The server trims commands and drops
+blanks/empty stages, so an all-empty `hooks` persists as `{}`.
 
 ### Environment variables
 

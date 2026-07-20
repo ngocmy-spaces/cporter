@@ -216,7 +216,7 @@ DB: cPanel's MySQL (or SQLite for a small deployment — **[ASSUMPTION B]** use 
 |---|---|---|
 | **User** | id, name, email, password, role | Admin panel login. |
 | **ApiKey / Token** | id, name, prefix, hash, scopes[], project_id?, last_used_at, expires_at, revoked_at | Token for CI. Stores the **hash** (Sanctum-style), shows plaintext once. Scopes: `deploy`, `read`, `rollback`, `admin`. |
-| **Project** | id, name, slug, base_path, type(`laravel`\|`static`\|`php`\|`node`\|`wordpress`), docroot_subpath, php_binary, keep_releases, health_check_url, hooks(json), shared_paths(json), env_vars(**encrypted** text — managed env vars), status(`active`\|`disabled`\|`deleting`), deleted_at, disk_usage, releases_disk_usage, disk_usage_status, disk_usage_calculated_at, shared_disk_usage(json — per-shared-path bytes) | Configuration for one managed domain. Soft-deleted (`deleted_at`); a `disabled` or `deleting` project rejects new deploys. Disk figures are recomputed by the deploy pipeline and the recompute endpoint (symlinks never followed, so shared data is counted once); `shared_disk_usage` breaks the shared total down per entry. **`env_vars`** is an ordered list of `{key,value}` stored **encrypted at rest** (Laravel `Crypt`, the app's only reversible-secret store); on deploy cPorter renders it into `shared/.env` (see §6, §9). Never serialized by `show`/`index` — read/written only via the admin-only `/projects/{slug}/env` endpoints (API.md). |
+| **Project** | id, name, slug, base_path, type(`laravel`\|`static`\|`php`\|`node`\|`wordpress`), docroot_subpath, keep_releases, health_check_url, hooks(json), shared_paths(json), env_vars(**encrypted** text — managed env vars), status(`active`\|`disabled`\|`deleting`), deleted_at, disk_usage, releases_disk_usage, disk_usage_status, disk_usage_calculated_at, shared_disk_usage(json — per-shared-path bytes) | Configuration for one managed domain. Soft-deleted (`deleted_at`); a `disabled` or `deleting` project rejects new deploys. Disk figures are recomputed by the deploy pipeline and the recompute endpoint (symlinks never followed, so shared data is counted once); `shared_disk_usage` breaks the shared total down per entry. **`env_vars`** is an ordered list of `{key,value}` stored **encrypted at rest** (Laravel `Crypt`, the app's only reversible-secret store); on deploy cPorter renders it into `shared/.env` (see §6, §9). Never serialized by `show`/`index` — read/written only via the admin-only `/projects/{slug}/env` endpoints (API.md). |
 | **Release** | id, project_id, ref/version, artifact_id, path, state(`pending`\|`extracting`\|`ready`\|`active`\|`superseded`\|`failed`), created_by, activated_at | One physical release. |
 | **Artifact** | id, project_id, filename, size, sha256, storage_path, uploaded_at, status | The build file from CI. |
 | **Deployment** | id, project_id, release_id, trigger(`api`\|`manual`\|`cron`), status(`queued`→`running`→`success`\|`failed`\|`rolled_back`), steps(json), started_at, finished_at, actor | One pipeline run. |
@@ -443,7 +443,7 @@ The adapter structure allows adding later: `SshStorageAdapter`, `S3ArtifactStore
 | Screen | Content |
 |---|---|
 | **Dashboard** | Project overview, recent deploys, success rate, active releases, alerts (pending migration, stuck lock). |
-| **Projects** | CRUD projects (base_path, type, docroot, php_binary, hooks, health check, keep_releases). "Deploy"/"Rollback" buttons. |
+| **Projects** | CRUD projects (base_path, type, docroot, hooks, health check, keep_releases). "Deploy"/"Rollback" buttons. |
 | **Deployments** | List + realtime status (poll), step timeline, log tail. |
 | **Releases** | Release history per project; activate (rollback) a release; view version diff. |
 | **Logs** | Centralized logs (deploy + audit), filter by project/status/time. |
@@ -500,16 +500,15 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
   "base_path": "/home/user/learn.domain",
   "type": "laravel",                 // laravel | static | php | node
   "docroot_subpath": "public",       // current/public
-  "php_binary": "/opt/cpanel/ea-php82/root/usr/bin/php",
   "keep_releases": 5,
   "shared_paths": [                        // each entry: {path, type}; type = "file" | "dir"
     { "path": ".env", "type": "file" },    // "file" → must be created in shared/ first (never auto-created empty)
     { "path": "storage", "type": "dir" }   // "dir"  → auto-created if missing
   ],                                        // bare strings (e.g. ".env") still accepted → normalized to type "dir"
   "health_check_url": "https://learn.domain/up",
-  "hooks": {
-    "pre_activate":  ["artisan migrate --force", "artisan config:cache"],
-    "post_activate": ["artisan queue:restart"]
+  "hooks": {                               // each entry is a full shell command, run verbatim on the cron worker
+    "pre_activate":  ["php artisan migrate --force", "php artisan config:cache"],
+    "post_activate": ["php artisan queue:restart"]
   }
 }
 ```

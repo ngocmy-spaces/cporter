@@ -37,8 +37,8 @@ beforeEach(function () {
         'keep_releases' => 5,
         'health_check_url' => null,
         'hooks' => [
-            'pre_activate' => ['artisan migrate --force'],
-            'post_activate' => ['artisan queue:restart'],
+            'pre_activate' => ['php artisan migrate --force'],
+            'post_activate' => ['php artisan queue:restart'],
         ],
     ]);
 
@@ -81,7 +81,7 @@ it('finalizes a Laravel deploy via the cron-worker (hooks → activate → succe
         ->and(file_exists($this->base.'/deploy.lock'))->toBeFalse() // lock released
         ->and(Release::find($created['release_id'])->state->value)->toBe('active');
 
-    // Hooks ran in the release dir, php-prefixed, in order.
+    // Hooks ran in the release dir, verbatim, in order.
     $commands = collect($this->cmd->ran)->pluck('command')->all();
     expect($commands)->toBe(['php artisan migrate --force', 'php artisan queue:restart'])
         ->and($this->cmd->ran[0]['cwd'])->toBe(realpath($this->base).'/releases/'.basename(Release::find($created['release_id'])->path));

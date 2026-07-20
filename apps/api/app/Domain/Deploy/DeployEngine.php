@@ -175,14 +175,11 @@ class DeployEngine
             throw new DeployException($message);
         }
 
-        $binary = $project->php_binary ?: 'php';
-
         foreach ($hooks as $hook) {
-            $command = str_starts_with($hook, 'artisan ') ? $binary.' '.$hook : $hook;
-            $steps->run("hook:{$phase}:{$hook}", function () use ($command, $release) {
-                $result = $this->commands->run($command, $release->path, [], 600);
+            $steps->run("hook:{$phase}:{$hook}", function () use ($hook, $release) {
+                $result = $this->commands->run($hook, $release->path, [], 600);
                 if (! $result->ok()) {
-                    throw new DeployException("Hook failed (exit {$result->exitCode}): {$command}\n{$result->output}");
+                    throw new DeployException("Hook failed (exit {$result->exitCode}): {$hook}\n{$result->output}");
                 }
             });
         }
