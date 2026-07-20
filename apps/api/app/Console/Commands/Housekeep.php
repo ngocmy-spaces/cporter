@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Deploy\ArtifactPruner;
+use App\Domain\Deploy\ReleasePruner;
 use App\Enums\DeploymentStatus;
 use App\Enums\ReleaseState;
 use App\Models\Deployment;
@@ -22,7 +23,7 @@ class Housekeep extends Command
 
     protected $description = 'Fail timed-out deployments, release stale locks, and reclaim artifact archives';
 
-    public function handle(StorageAdapter $storage, ArtifactPruner $artifacts): int
+    public function handle(StorageAdapter $storage, ArtifactPruner $artifacts, ReleasePruner $releases): int
     {
         $cutoff = now()->subSeconds((int) config('cporter.deployment_timeout', 1800));
 
@@ -52,6 +53,9 @@ class Housekeep extends Command
         $freed = 0;
         foreach (Project::withTrashed()->get() as $project) {
             try {
+                // Reconcile release rows whose dirs are gone (self-heal historical data), then
+                // reclaim redundant artifact zips.
+                $releases->reconcile($project);
                 $result = $artifacts->prune($project);
                 $removed += $result['removed'];
                 $freed += $result['freed'];

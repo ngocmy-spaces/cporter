@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Domain\Audit\AuditLogger;
 use App\Domain\Deploy\DeployException;
+use App\Domain\Deploy\ReleasePruner;
 use App\Domain\Deploy\RollbackEngine;
 use App\Enums\DeploymentTrigger;
 use App\Enums\ReleaseState;
@@ -26,8 +27,12 @@ class ReleaseController extends Controller
      * dead "Activate" buttons. Full history (including these) lives in the Deployments view. The
      * result is naturally bounded by keep_releases (docs/SPEC.md §6, §8).
      */
-    public function index(Project $project): JsonResponse
+    public function index(Project $project, ReleasePruner $pruner): JsonResponse
     {
+        // Self-heal any superseded rows whose directory is already gone (e.g. pruned before this
+        // bookkeeping existed) so the list never offers a dead "Activate".
+        $pruner->reconcile($project);
+
         return response()->json([
             'data' => $project->releases()
                 ->with('artifact')

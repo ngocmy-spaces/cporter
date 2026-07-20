@@ -119,3 +119,16 @@ it('lists only re-activatable releases, hiding pruned ones', function () {
         ->and($ids)->not->toContain($this->releases[1]->id)
         ->and($ids)->not->toContain($this->releases[2]->id);
 });
+
+it('reconciles superseded releases whose directory is gone (historical data self-heal)', function () {
+    // Simulate a release pruned before this bookkeeping existed: row still superseded, dir removed.
+    File::deleteDirectory($this->base.'/releases/rel1');
+
+    $res = $this->actingAs($this->admin)->getJson('/api/v1/projects/shop/releases')->assertOk();
+
+    $ids = collect($res->json('data'))->pluck('id')->all();
+    expect($ids)->not->toContain($this->releases[1]->id)
+        ->and($this->releases[1]->fresh()->state)->toBe(ReleaseState::Pruned)
+        // A release whose dir still exists stays listed.
+        ->and($ids)->toContain($this->releases[2]->id);
+});

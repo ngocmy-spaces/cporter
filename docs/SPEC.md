@@ -428,7 +428,7 @@ StorageAdapter:
 ```
 
 **Retention services** wrap the raw adapter to keep the DB in step with the disk:
-- **ReleasePruner** calls `pruneReleases` and marks the removed release rows `pruned` (used by every deploy's prune step and by lowering `keep_releases`, which prunes immediately).
+- **ReleasePruner** calls `pruneReleases` and marks the removed release rows `pruned` (used by every deploy's prune step and by lowering `keep_releases`, which prunes immediately). Its `reconcile()` also self-heals historical data — superseded rows whose directory is already gone are marked `pruned` — run when the releases list is opened and by the housekeeper.
 - **ArtifactPruner** reclaims artifact `.zip`s via `deleteArtifact`, keeping only the live release's (plus any in-flight deploy's / not-yet-attached upload); it nulls `storage_path` + stamps `pruned_at` but never deletes the row. Run by the post-deploy task (§6 step 15b) and the housekeeper (§10).
 - **Post-deploy tasks** (`config('cporter.post_deploy_tasks')`) run after a successful deploy; each is container-resolved and isolated (a failure is recorded, never fails the deploy), so notify/webhook tasks can be added without touching the pipeline.
 
