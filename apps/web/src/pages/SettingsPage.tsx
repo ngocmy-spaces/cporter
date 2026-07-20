@@ -131,25 +131,31 @@ export function SettingsPage() {
                 cron shell that actually runs hooks may resolve a different PATH — treat this as a
                 hint, not a guarantee.
               </Text>
-              <List spacing={8} size="sm" center>
-                {Object.entries(result.binaries).map(([name, path]) => (
-                  <List.Item
-                    key={name}
-                    icon={
-                      <ThemeIcon color={path ? 'green' : 'red'} size={18} radius="xl" variant="light">
-                        {path ? <IconCheck size={12} /> : <IconX size={12} />}
-                      </ThemeIcon>
-                    }
-                  >
-                    <Group gap="xs" wrap="nowrap">
-                      <Text size="sm" fw={500} w={80}>
-                        {name}
-                      </Text>
-                      {path ? <Code>{path}</Code> : <Text size="sm" c="dimmed">not found</Text>}
-                    </Group>
-                  </List.Item>
-                ))}
-              </List>
+              {Object.keys(result.binaries ?? {}).length === 0 ? (
+                <Text c="dimmed" size="sm">
+                  Not probed yet — click <b>Re-probe</b> to detect binaries.
+                </Text>
+              ) : (
+                <List spacing={8} size="sm" center>
+                  {Object.entries(result.binaries ?? {}).map(([name, path]) => (
+                    <List.Item
+                      key={name}
+                      icon={
+                        <ThemeIcon color={path ? 'green' : 'red'} size={18} radius="xl" variant="light">
+                          {path ? <IconCheck size={12} /> : <IconX size={12} />}
+                        </ThemeIcon>
+                      }
+                    >
+                      <Group gap="xs" wrap="nowrap">
+                        <Text size="sm" fw={500} w={80}>
+                          {name}
+                        </Text>
+                        {path ? <Code>{path}</Code> : <Text size="sm" c="dimmed">not found</Text>}
+                      </Group>
+                    </List.Item>
+                  ))}
+                </List>
+              )}
             </Card>
 
             <Card withBorder radius="md" p="md">

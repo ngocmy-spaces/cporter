@@ -34,3 +34,19 @@ it('persists the capability probe on GET and refreshes on POST', function () {
         ->assertOk()
         ->assertJsonStructure(['data', 'probed_at']);
 });
+
+it('re-probes when the stored payload predates a probe-schema change (no binaries key)', function () {
+    $user = User::factory()->create();
+
+    // Simulate a cache written before `binaries` was added to the probe.
+    Setting::write('capabilities', [
+        'result' => ['php_version' => '8.3.0', 'command_driver' => 'cron-worker'],
+        'probed_at' => '2026-01-01T00:00:00+00:00',
+    ]);
+
+    $this->actingAs($user)->getJson('/api/v1/system/capabilities')
+        ->assertOk()
+        ->assertJsonStructure(['data' => ['binaries']]);
+
+    expect(Setting::read('capabilities')['result'])->toHaveKey('binaries');
+});

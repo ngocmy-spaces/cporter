@@ -20,7 +20,13 @@ class SystemController extends Controller
     /** Return the stored probe, running (and persisting) one on first access. */
     public function capabilities(CapabilityProbe $probe): JsonResponse
     {
-        $payload = Setting::read(self::CAPABILITIES_KEY) ?? $this->probeAndStore($probe);
+        $payload = Setting::read(self::CAPABILITIES_KEY);
+
+        // Re-probe when nothing is stored yet, or when a payload predates a probe-schema change
+        // (e.g. `binaries` added) so the UI never receives a partial shape.
+        if (! is_array($payload) || ! array_key_exists('binaries', $payload['result'] ?? [])) {
+            $payload = $this->probeAndStore($probe);
+        }
 
         return $this->respond($payload);
     }
