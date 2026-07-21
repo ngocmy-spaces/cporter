@@ -409,6 +409,14 @@ beat older than its cadence threshold reads as `down`. The Admin **Settings** pa
 card so a stalled cron (which would silently strand Laravel deploys in `hooks_pending`) is visible without any
 external monitoring service.
 
+**Artifact-store heartbeat.** Each `cporter:housekeep` sweep also records `artifact_storage_last_sweep` in the
+settings store — the artifact store's total on-disk size, the un-reclaimed backlog, and the last sweep's result.
+`GET /system/storage` returns `{state: healthy|warning|unknown, store_bytes, unpruned_count, reclaimed_count,
+freed_bytes, last_run_at, prune_enabled, warn_bytes, warnings[]}`; it flags a disabled pruner
+(`pruning_disabled`), a store past `CPORTER_ARTIFACT_STORE_WARN_BYTES` (`store_over_threshold`), or a stalled
+housekeeper (`sweep_stale`). This is the only place cPorter's own artifact storage (which `disk_usage` — a
+per-project base_path figure — does not cover) is surfaced. The Settings page shows it as a companion card.
+
 ---
 
 ## 11. Storage Abstraction & cPanel FS Adapter

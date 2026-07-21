@@ -46,6 +46,8 @@ return [
         // rollback re-points `current` at an existing release dir). DB rows are always kept.
         // Set false to retain every zip on disk.
         'prune_after_deploy' => filter_var(env('CPORTER_PRUNE_ARTIFACTS', true), FILTER_VALIDATE_BOOL),
+        // Warn (in the System status) when the on-disk artifact store grows past this. 0 disables.
+        'store_warn_bytes' => (int) env('CPORTER_ARTIFACT_STORE_WARN_BYTES', 2 * 1024 * 1024 * 1024),
     ],
 
     // Ordered tasks run after a successful deploy (docs/SPEC.md §6). Each is resolved from the

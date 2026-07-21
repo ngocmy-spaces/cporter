@@ -17,6 +17,7 @@ const RELEASE_COLORS: Record<ReleaseState, string> = {
   extracting: 'blue',
   superseded: 'gray',
   failed: 'red',
+  pruned: 'gray',
 };
 
 export function DeploymentStatusBadge({ status }: { status: DeploymentStatus }) {

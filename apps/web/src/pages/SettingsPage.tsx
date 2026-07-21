@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { notifyError, notifySuccess } from '@/lib/feedback';
 import { formatBytes, formatDateTime, formatRelativeTime } from '@/lib/format';
-import type { Capabilities, CronStatus } from '@/lib/types';
+import type { Capabilities, CronStatus, StorageStatus, StorageWarningCode } from '@/lib/types';
 
 interface CapabilitiesResponse {
   data: Capabilities;
@@ -26,6 +26,12 @@ export function SettingsPage() {
   const cron = useQuery({
     queryKey: ['system', 'cron'],
     queryFn: async () => (await api.get<{ data: CronStatus }>('/system/cron')).data.data,
+    refetchInterval: 30_000, // keep the liveness view fresh
+  });
+
+  const storage = useQuery({
+    queryKey: ['system', 'storage'],
+    queryFn: async () => (await api.get<{ data: StorageStatus }>('/system/storage')).data.data,
     refetchInterval: 30_000, // keep the liveness view fresh
   });
 
@@ -61,6 +67,8 @@ export function SettingsPage() {
       </Group>
 
       <CronCard status={cron.data} loading={cron.isLoading} />
+
+      <StorageCard status={storage.data} loading={storage.isLoading} />
 
       <PanelBody
         query={capabilities}
@@ -238,6 +246,73 @@ function CronCard({ status, loading }: { status: CronStatus | undefined; loading
         <Alert color="yellow" mt="md" title="No cron heartbeat yet">
           The cron has never checked in. Add the cPanel cron job (schedule:run every minute, or
           cporter:work every 5 minutes) — see docs/DEPLOYMENT-CPANEL.md §4.
+        </Alert>
+      )}
+    </Card>
+  );
+}
+
+const STORAGE_WARNING_COPY: Record<StorageWarningCode, string> = {
+  pruning_disabled:
+    'Artifact pruning is disabled (CPORTER_PRUNE_ARTIFACTS) — zips are not reclaimed.',
+  store_over_threshold: 'Artifact store exceeds the warning threshold.',
+  sweep_stale: 'Last cleanup sweep is stale — the housekeeper may not be running.',
+};
+
+function StorageCard({ status, loading }: { status: StorageStatus | undefined; loading: boolean }) {
+  const meta = {
+    healthy: { color: 'green', label: 'Healthy' },
+    warning: { color: 'yellow', label: 'Warning' },
+    unknown: { color: 'gray', label: 'Never run' },
+  } as const;
+
+  const state = status?.state ?? 'unknown';
+  const { color, label } = meta[state];
+  const warnings = status?.warnings ?? [];
+
+  return (
+    <Card withBorder radius="md" p="md">
+      <Group justify="space-between" mb="xs">
+        <Text fw={600}>Artifact storage</Text>
+        <Badge color={color} variant="light">
+          {loading ? 'Checking…' : label}
+        </Badge>
+      </Group>
+
+      <Stack gap={4}>
+        <Row label="Store size" value={formatBytes(status?.store_bytes)} />
+        <Row
+          label="Archives on disk"
+          value={status?.unpruned_count != null ? `${status.unpruned_count} archives` : '—'}
+        />
+        <Row label="Last cleanup" value={formatRelativeTime(status?.last_run_at)} />
+        <Row
+          label="Last sweep result"
+          value={
+            status?.reclaimed_count != null
+              ? `reclaimed ${status.reclaimed_count} · freed ${formatBytes(status.freed_bytes)}`
+              : '—'
+          }
+        />
+        <Row label="Host" value={status?.host ?? '—'} />
+      </Stack>
+
+      {state === 'unknown' && (
+        <Alert color="gray" mt="md" title="No cleanup sweep yet">
+          No cleanup sweep has run yet.
+        </Alert>
+      )}
+      {warnings.length > 0 && (
+        <Alert color={state === 'warning' ? 'yellow' : 'gray'} mt="md" title="Storage warnings">
+          <List spacing={4} size="sm">
+            {warnings.map((code) => (
+              <List.Item key={code}>
+                {code === 'store_over_threshold'
+                  ? `Artifact store exceeds the warning threshold (${formatBytes(status?.warn_bytes)}).`
+                  : STORAGE_WARNING_COPY[code]}
+              </List.Item>
+            ))}
+          </List>
         </Alert>
       )}
     </Card>

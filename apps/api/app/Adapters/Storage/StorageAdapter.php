@@ -22,6 +22,9 @@ interface StorageAdapter
      */
     public function deleteArtifact(string $storagePath): int;
 
+    /** Total on-disk size (bytes) of cPorter's internal artifact store (storage/app/artifacts). */
+    public function artifactStoreBytes(): int;
+
     /** Extract a .zip into $destDir (Zip-Slip safe). */
     public function extractZip(string $archivePath, string $destDir): void;
 

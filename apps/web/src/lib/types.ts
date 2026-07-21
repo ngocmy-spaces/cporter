@@ -16,7 +16,14 @@ export type DeploymentStatus =
 
 export type DeploymentTrigger = 'api' | 'manual' | 'cron' | 'webhook';
 
-export type ReleaseState = 'pending' | 'extracting' | 'ready' | 'active' | 'superseded' | 'failed';
+export type ReleaseState =
+  | 'pending'
+  | 'extracting'
+  | 'ready'
+  | 'active'
+  | 'superseded'
+  | 'failed'
+  | 'pruned';
 
 export type ApiScope = 'read' | 'deploy' | 'rollback' | 'admin';
 
@@ -209,6 +216,31 @@ export interface CronStatus {
   last_run_at: string | null;
   host: string | null;
   passes: number | null;
+}
+
+/** Codes surfaced by the artifact-storage heartbeat's `warnings` array. */
+export type StorageWarningCode = 'pruning_disabled' | 'store_over_threshold' | 'sweep_stale';
+
+/** Artifact storage housekeeping liveness from the reclaim sweep (docs/SPEC.md §10). */
+export interface StorageStatus {
+  /** healthy = last sweep ran and store is under threshold; warning = a warnings[] condition; unknown = never swept. */
+  state: 'healthy' | 'warning' | 'unknown';
+  last_run_at: string | null;
+  age_seconds: number | null;
+  /** Total size of cPorter's artifact store on disk, in bytes. */
+  store_bytes: number | null;
+  /** Artifacts still holding a .zip on disk (not yet reclaimed). */
+  unpruned_count: number | null;
+  /** Reclaimed in the last sweep. */
+  reclaimed_count: number | null;
+  /** Freed in the last sweep, in bytes. */
+  freed_bytes: number | null;
+  projects_swept: number | null;
+  prune_enabled: boolean;
+  /** Threshold that triggers the `store_over_threshold` warning, in bytes. */
+  warn_bytes: number;
+  host: string | null;
+  warnings: StorageWarningCode[];
 }
 
 export type PreflightStatus = 'ok' | 'created' | 'pending' | 'warning' | 'error' | 'manual';

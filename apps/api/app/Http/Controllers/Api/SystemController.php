@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Domain\System\ArtifactStorageHeartbeat;
 use App\Domain\System\CapabilityProbe;
 use App\Domain\System\CronHeartbeat;
 use App\Http\Controllers\Controller;
@@ -64,6 +65,12 @@ class SystemController extends Controller
 
     /** Cron liveness + cadence mode from the heartbeat store (docs/SPEC.md §10). */
     public function cron(CronHeartbeat $heartbeat): JsonResponse
+    {
+        return response()->json(['data' => $heartbeat->status()]);
+    }
+
+    /** Artifact-store size + cleanup health from the last housekeep sweep (docs/SPEC.md §6, §11). */
+    public function storage(ArtifactStorageHeartbeat $heartbeat): JsonResponse
     {
         return response()->json(['data' => $heartbeat->status()]);
     }

@@ -72,6 +72,13 @@ class CpanelFilesystemAdapter implements StorageAdapter
         return $freed;
     }
 
+    public function artifactStoreBytes(): int
+    {
+        $root = storage_path('app/artifacts');
+
+        return is_dir($root) ? $this->dirBytes($root) : 0;
+    }
+
     public function extractZip(string $archivePath, string $destDir): void
     {
         if (! is_file($archivePath)) {

@@ -107,6 +107,8 @@ Used only by the SPA. **Not reachable with an API key** (session guard). Listed 
 | POST | `/auth/login` · `/auth/logout` · GET `/auth/user` | session | login flow |
 | GET | `/system/capabilities` | read | capability probe result |
 | POST | `/system/capabilities/refresh` | admin | re-run the probe |
+| GET | `/system/cron` | read | cron liveness + cadence mode (heartbeat) |
+| GET | `/system/storage` | read | artifact-store health from the last housekeep sweep: `{ state: healthy\|warning\|unknown, store_bytes, unpruned_count, reclaimed_count, freed_bytes, last_run_at, prune_enabled, warn_bytes, warnings[] }` (warning codes: `pruning_disabled`, `store_over_threshold`, `sweep_stale`) |
 | GET/POST/DELETE | `/api-keys` · `/api-keys/{id}` | read / admin | token CRUD (plaintext shown once) |
 | GET | `/projects` · `/projects/{slug}` | read | list / show projects. `?search=` + `?status=active\|disabled\|deleting` filter; `?page=`/`?per_page=` (≤100) switch to a paginated `{data, meta}` envelope, else the full list. **Show** also embeds `active_release` (`{id,version,activated_at}`) and `last_deployment` (`{id,status,created_at}`) summaries (or `null`) so the detail page can lazy-load the per-tab lists |
 | POST | `/projects` | admin | create a project (jail-validated `base_path`, which must not already be used by another project). Also scaffolds `releases/` + `shared/` and returns a `preflight` report alongside `data` (see below) |

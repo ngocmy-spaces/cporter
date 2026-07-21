@@ -5,8 +5,10 @@ namespace App\Console\Commands;
 use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Deploy\ArtifactPruner;
 use App\Domain\Deploy\ReleasePruner;
+use App\Domain\System\ArtifactStorageHeartbeat;
 use App\Enums\DeploymentStatus;
 use App\Enums\ReleaseState;
+use App\Models\Artifact;
 use App\Models\Deployment;
 use App\Models\Project;
 use Illuminate\Console\Command;
@@ -23,7 +25,7 @@ class Housekeep extends Command
 
     protected $description = 'Fail timed-out deployments, release stale locks, and reclaim artifact archives';
 
-    public function handle(StorageAdapter $storage, ArtifactPruner $artifacts, ReleasePruner $releases): int
+    public function handle(StorageAdapter $storage, ArtifactPruner $artifacts, ReleasePruner $releases, ArtifactStorageHeartbeat $heartbeat): int
     {
         $cutoff = now()->subSeconds((int) config('cporter.deployment_timeout', 1800));
 
@@ -51,6 +53,7 @@ class Housekeep extends Command
         // any in-flight deploy's artifact, so a zip mid-deploy is never touched.
         $removed = 0;
         $freed = 0;
+        $swept = 0;
         foreach (Project::withTrashed()->get() as $project) {
             try {
                 // Reconcile release rows whose dirs are gone (self-heal historical data), then
@@ -59,10 +62,21 @@ class Housekeep extends Command
                 $result = $artifacts->prune($project);
                 $removed += $result['removed'];
                 $freed += $result['freed'];
+                $swept++;
             } catch (Throwable) {
                 // Never let one project's storage error abort the whole sweep.
             }
         }
+
+        // Record a heartbeat so the System status can show the artifact store size + backlog and
+        // flag a stalled/disabled cleanup — the reclaim itself surfaces nowhere else.
+        $heartbeat->record([
+            'projects_swept' => $swept,
+            'reclaimed_count' => $removed,
+            'freed_bytes' => $freed,
+            'store_bytes' => $storage->artifactStoreBytes(),
+            'unpruned_count' => Artifact::query()->whereNotNull('storage_path')->count(),
+        ]);
 
         $this->info("cporter:housekeep — failed {$stuck->count()} stuck deployment(s); reclaimed {$removed} artifact archive(s), {$freed} byte(s).");
 
