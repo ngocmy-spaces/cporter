@@ -79,6 +79,71 @@ class CpanelFilesystemAdapter implements StorageAdapter
         return is_dir($root) ? $this->dirBytes($root) : 0;
     }
 
+    public function pruneOrphanArtifacts(array $referenced, int $minAgeSeconds): array
+    {
+        $root = rtrim(storage_path('app/artifacts'), '/');
+        if (! is_dir($root)) {
+            return ['removed' => 0, 'freed' => 0];
+        }
+
+        // Set of absolute paths we must keep (still referenced by an Artifact row).
+        $keep = [];
+        foreach ($referenced as $path) {
+            $real = realpath((string) $path);
+            if ($real !== false) {
+                $keep[$real] = true;
+            }
+        }
+
+        $cutoff = time() - max(0, $minAgeSeconds);
+        $removed = 0;
+        $freed = 0;
+
+        foreach (scandir($root) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $path = $root.'/'.$entry;
+            if (is_link($path) || ! is_dir($path)) {
+                continue;
+            }
+
+            // Stale chunked-upload sessions (storage/app/artifacts/uploads/<uuid>/) — whole dirs.
+            if ($entry === 'uploads') {
+                foreach (scandir($path) ?: [] as $session) {
+                    if ($session === '.' || $session === '..') {
+                        continue;
+                    }
+                    $dir = $path.'/'.$session;
+                    if (is_dir($dir) && ! is_link($dir) && (filemtime($dir) ?: 0) < $cutoff) {
+                        $freed += $this->dirBytes($dir);
+                        $this->deleteRecursive($dir);
+                        $removed++;
+                    }
+                }
+
+                continue;
+            }
+
+            // Per-project dir: drop *.zip files no Artifact row references and old enough to be safe.
+            foreach (scandir($path) ?: [] as $file) {
+                if (! str_ends_with($file, '.zip')) {
+                    continue;
+                }
+                $zip = $path.'/'.$file;
+                $real = realpath($zip) ?: $zip;
+                if (isset($keep[$real]) || (filemtime($zip) ?: 0) >= $cutoff) {
+                    continue; // still referenced, or too fresh (possible in-flight upload)
+                }
+                $freed += is_file($zip) ? (filesize($zip) ?: 0) : 0;
+                @unlink($zip);
+                $removed++;
+            }
+        }
+
+        return ['removed' => $removed, 'freed' => $freed];
+    }
+
     public function extractZip(string $archivePath, string $destDir): void
     {
         if (! is_file($archivePath)) {

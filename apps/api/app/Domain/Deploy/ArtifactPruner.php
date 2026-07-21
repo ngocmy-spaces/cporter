@@ -84,6 +84,28 @@ class ArtifactPruner
     }
 
     /**
+     * Reclaim orphaned .zip files on disk that no Artifact row references — rows pruned before the
+     * file could be removed, or a deleted project's leftovers — plus stale chunked-upload sessions.
+     * Global (all projects). Only entries older than $minAgeSeconds are touched, so a just-uploaded
+     * file (row not yet created) or an in-flight deploy is never affected.
+     *
+     * @return array{removed: int, freed: int}
+     */
+    public function pruneOrphans(int $minAgeSeconds): array
+    {
+        if (! (bool) config('cporter.artifact.prune_after_deploy', true)) {
+            return ['removed' => 0, 'freed' => 0];
+        }
+
+        $referenced = Artifact::query()
+            ->whereNotNull('storage_path')
+            ->pluck('storage_path')
+            ->all();
+
+        return $this->storage->pruneOrphanArtifacts($referenced, $minAgeSeconds);
+    }
+
+    /**
      * Artifact ids whose zip must be kept on disk.
      *
      * @return Collection<int, int>

@@ -68,6 +68,17 @@ class Housekeep extends Command
             }
         }
 
+        // Sweep orphaned zips + stale upload sessions the DB-driven prune can't see (rows pruned
+        // before their file was removed, deleted-project leftovers). Guard on a deploy-timeout age
+        // so a just-uploaded/in-flight file is never touched.
+        try {
+            $orphans = $artifacts->pruneOrphans((int) config('cporter.deployment_timeout', 1800));
+            $removed += $orphans['removed'];
+            $freed += $orphans['freed'];
+        } catch (Throwable) {
+            // Storage error — never abort housekeeping.
+        }
+
         // Record a heartbeat so the System status can show the artifact store size + backlog and
         // flag a stalled/disabled cleanup — the reclaim itself surfaces nowhere else.
         $heartbeat->record([

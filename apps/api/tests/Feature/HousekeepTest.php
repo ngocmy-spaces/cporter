@@ -114,6 +114,47 @@ it('reclaims redundant artifact zips project-wide, sparing live and in-flight on
     File::deleteDirectory($dir);
 });
 
+it('reclaims orphan zips + stale upload sessions the DB-driven prune cannot see', function () {
+    $dir = storage_path('app/artifacts/'.$this->project->slug);
+    File::makeDirectory($dir, 0777, true, true);
+    $old = time() - 3600; // older than the deploy-timeout guard (default 1800s)
+
+    // Referenced by a live Artifact row → kept regardless of age.
+    $keptPath = $dir.'/kept.zip';
+    File::put($keptPath, 'kept');
+    touch($keptPath, $old);
+    Artifact::create([
+        'project_id' => $this->project->id, 'filename' => 'kept.zip', 'size' => 4,
+        'sha256' => hash('sha256', 'kept'), 'storage_path' => $keptPath,
+        'status' => 'verified', 'uploaded_at' => now(),
+    ]);
+
+    // Orphan (no row), old → reclaimed.
+    $orphanOld = $dir.'/orphan-old.zip';
+    File::put($orphanOld, 'orphan');
+    touch($orphanOld, $old);
+
+    // Orphan (no row) but FRESH → spared (could be a file mid-upload before its row exists).
+    $orphanFresh = $dir.'/orphan-fresh.zip';
+    File::put($orphanFresh, 'fresh');
+
+    // Stale chunked-upload session → reclaimed.
+    $session = storage_path('app/artifacts/uploads/deadbeef');
+    File::makeDirectory($session, 0777, true, true);
+    File::put($session.'/0', 'chunk');
+    touch($session, $old);
+
+    Artisan::call('cporter:housekeep');
+
+    expect(file_exists($keptPath))->toBeTrue()          // referenced
+        ->and(file_exists($orphanFresh))->toBeTrue()    // too fresh
+        ->and(file_exists($orphanOld))->toBeFalse()     // orphan reclaimed
+        ->and(is_dir($session))->toBeFalse();           // stale upload session reclaimed
+
+    File::deleteDirectory($dir);
+    File::deleteDirectory(storage_path('app/artifacts/uploads'));
+});
+
 it('reports artifact-store status via /system/storage', function () {
     $admin = User::factory()->create();
 

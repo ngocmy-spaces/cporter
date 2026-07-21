@@ -25,6 +25,17 @@ interface StorageAdapter
     /** Total on-disk size (bytes) of cPorter's internal artifact store (storage/app/artifacts). */
     public function artifactStoreBytes(): int;
 
+    /**
+     * Reclaim orphaned entries in the artifact store that the DB-driven pruner can't see: `.zip`
+     * files no Artifact row references (e.g. rows pruned earlier but the file was left behind, or
+     * a deleted project's leftovers) and stale chunked-upload session dirs. Only entries OLDER
+     * than $minAgeSeconds are touched, so an in-flight upload/deploy is never affected.
+     *
+     * @param  list<string>  $referenced  absolute storage paths still referenced by an Artifact row (kept)
+     * @return array{removed: int, freed: int}
+     */
+    public function pruneOrphanArtifacts(array $referenced, int $minAgeSeconds): array;
+
     /** Extract a .zip into $destDir (Zip-Slip safe). */
     public function extractZip(string $archivePath, string $destDir): void;
 
