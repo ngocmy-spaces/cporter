@@ -85,6 +85,11 @@ it('finalizes a Laravel deploy via the cron-worker (hooks → activate → succe
     $commands = collect($this->cmd->ran)->pluck('command')->all();
     expect($commands)->toBe(['php artisan migrate --force', 'php artisan queue:restart'])
         ->and($this->cmd->ran[0]['cwd'])->toBe(realpath($this->base).'/releases/'.basename(Release::find($created['release_id'])->path));
+
+    // A successful hook keeps its output on the step, so a "success but did nothing" hook is visible.
+    $hookStep = collect($deployment->steps)->firstWhere('name', 'hook:pre_activate:php artisan migrate --force');
+    expect($hookStep['status'])->toBe('success')
+        ->and($hookStep['note'] ?? null)->toContain('ok: php artisan migrate --force');
 });
 
 it('fails without activating when a pre-activate hook fails', function () {

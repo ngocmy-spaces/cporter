@@ -184,13 +184,29 @@ class DeployEngine
         }
 
         foreach ($hooks as $hook) {
-            $steps->run("hook:{$phase}:{$hook}", function () use ($hook, $release) {
+            $steps->run("hook:{$phase}:{$hook}", function () use ($hook, $release): ?string {
                 $result = $this->commands->run($hook, $release->path, [], 600);
                 if (! $result->ok()) {
                     throw new DeployException("Hook failed (exit {$result->exitCode}): {$hook}\n{$result->output}");
                 }
+
+                // Keep the hook's stdout/stderr on the successful step too — otherwise a hook that
+                // "succeeds" but does nothing (e.g. `migrate` running under the wrong PHP → "Nothing
+                // to migrate") is invisible. Tail-capped so a chatty hook can't bloat the steps JSON.
+                return $this->tail($result->output);
             });
         }
+    }
+
+    /** Last ~2KB of a hook's output, for the step note (null when empty). */
+    private function tail(string $output, int $max = 2000): ?string
+    {
+        $output = trim($output);
+        if ($output === '') {
+            return null;
+        }
+
+        return strlen($output) > $max ? '…'.substr($output, -$max) : $output;
     }
 
     private function healthy(StepRunner $steps, Project $project): bool

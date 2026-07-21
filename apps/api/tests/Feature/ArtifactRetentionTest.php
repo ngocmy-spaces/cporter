@@ -2,6 +2,7 @@
 
 use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Auth\ApiKeyService;
+use App\Domain\Deploy\ArtifactPruner;
 use App\Domain\Deploy\RollbackEngine;
 use App\Domain\Storage\PathJail;
 use App\Enums\DeploymentTrigger;
@@ -96,6 +97,28 @@ it('retains every zip when pruning is disabled', function () {
     deployStatic($this, 'two');
 
     expect(Artifact::find($firstArtifactId)->storage_path)->not->toBeNull();
+});
+
+it('keeps the deploy successful with a single warning when artifact cleanup fails', function () {
+    // Simulate the cleanup blowing up (e.g. schema not migrated yet).
+    app()->bind(ArtifactPruner::class, fn () => new class(app(StorageAdapter::class)) extends ArtifactPruner
+    {
+        public function prune(Project $project): array
+        {
+            throw new RuntimeException('boom');
+        }
+    });
+
+    $dep = deployStatic($this, 'one');
+
+    // Deploy still succeeds — post-deploy cleanup is non-fatal.
+    expect($dep['status'])->toBe('success');
+
+    // Exactly one prune_artifacts step, recorded as a warning (not a failed/red step, not doubled).
+    $pruneSteps = collect($dep['steps'])->where('name', 'prune_artifacts')->values();
+    expect($pruneSteps)->toHaveCount(1)
+        ->and($pruneSteps[0]['status'])->toBe('warning')
+        ->and($pruneSteps[0]['note'])->toContain('boom');
 });
 
 it('makes a new deploy live even while rolled back to an older release', function () {

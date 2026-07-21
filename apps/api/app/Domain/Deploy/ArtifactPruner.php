@@ -10,6 +10,7 @@ use App\Models\Deployment;
 use App\Models\Project;
 use App\Models\Release;
 use Illuminate\Support\Collection;
+use Throwable;
 
 /**
  * Reclaims on-disk artifact .zip files (docs/SPEC.md §5, §6).
@@ -60,11 +61,22 @@ class ArtifactPruner
         $freed = 0;
 
         foreach ($candidates as $artifact) {
-            $freed += $this->storage->deleteArtifact((string) $artifact->storage_path);
-            $artifact->forceFill([
-                'storage_path' => null,
-                'pruned_at' => now(),
-            ])->save();
+            $path = (string) $artifact->storage_path;
+
+            try {
+                // Record the reclaim in the DB FIRST, then delete the file. If the row can't be
+                // updated (e.g. the pruned_at column isn't migrated yet, or the DB is down), we
+                // skip cleanly WITHOUT deleting the file — so a not-yet-ready schema never strands
+                // an orphaned zip. The artifact stays a candidate and is retried next sweep.
+                $artifact->forceFill([
+                    'storage_path' => null,
+                    'pruned_at' => now(),
+                ])->save();
+            } catch (Throwable) {
+                continue;
+            }
+
+            $freed += $this->storage->deleteArtifact($path);
             $removed++;
         }
 

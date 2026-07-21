@@ -3,10 +3,14 @@
 namespace App\Domain\Deploy\PostDeploy;
 
 use App\Domain\Deploy\ArtifactPruner;
+use Throwable;
 
 /**
  * Post-deploy cleanup: reclaim the project's now-redundant artifact .zip files, keeping only the
  * live release's zip (+ any in-flight deploy's). Recorded as the `prune_artifacts` pipeline step.
+ *
+ * The deploy has already succeeded, so a cleanup hiccup must never look like a failed deploy: a
+ * failure is recorded as a single non-fatal `warning` step (not a red failure, and not rethrown).
  */
 class PruneArtifactsTask implements PostDeployTask
 {
@@ -19,19 +23,18 @@ class PruneArtifactsTask implements PostDeployTask
 
     public function handle(PostDeployContext $ctx): void
     {
-        $ctx->steps->run($this->name(), function () use ($ctx): ?string {
+        try {
             $result = $this->pruner->prune($ctx->project);
+        } catch (Throwable $e) {
+            $ctx->steps->warn($this->name(), 'Artifact cleanup skipped: '.$e->getMessage());
 
-            if ($result['removed'] === 0) {
-                return 'No redundant artifacts to reclaim.';
-            }
+            return;
+        }
 
-            return sprintf(
-                'Reclaimed %d artifact archive(s), freed %s.',
-                $result['removed'],
-                $this->humanBytes($result['freed']),
-            );
-        });
+        // Prune succeeded — record a green step with a human summary (run() won't throw here).
+        $ctx->steps->run($this->name(), fn (): string => $result['removed'] === 0
+            ? 'No redundant artifacts to reclaim.'
+            : sprintf('Reclaimed %d artifact archive(s), freed %s.', $result['removed'], $this->humanBytes($result['freed'])));
     }
 
     private function humanBytes(int $bytes): string
