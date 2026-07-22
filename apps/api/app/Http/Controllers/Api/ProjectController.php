@@ -10,6 +10,7 @@ use App\Domain\Storage\PathJail;
 use App\Enums\ProjectStatus;
 use App\Enums\ProjectType;
 use App\Enums\ReleaseState;
+use App\Enums\RollbackTrigger;
 use App\Http\Controllers\Controller;
 use App\Jobs\PurgeProjectJob;
 use App\Jobs\RecomputeDiskUsageJob;
@@ -118,7 +119,8 @@ class ProjectController extends Controller
             'type' => ['required', Rule::enum(ProjectType::class)],
             'docroot_subpath' => ['nullable', 'string', 'max:255'],
             'keep_releases' => ['nullable', 'integer', 'min:1', 'max:50'],
-            'auto_rollback' => ['nullable', 'boolean'],
+            'auto_rollback_on' => ['nullable', 'array'],
+            'auto_rollback_on.*' => [Rule::enum(RollbackTrigger::class)],
             'health_check_url' => ['nullable', 'url'],
             'shared_paths' => ['array'],
             'shared_paths.*' => [$this->sharedPathRule()],
@@ -153,7 +155,7 @@ class ProjectController extends Controller
             'type' => $project->type,
             'docroot_subpath' => $project->docroot_subpath,
             'keep_releases' => $project->keep_releases,
-            'auto_rollback' => $project->auto_rollback,
+            'auto_rollback_on' => $project->auto_rollback_on,
             'health_check_url' => $project->health_check_url,
             'shared_paths' => $project->shared_paths,
             'hooks' => $project->hooks,
@@ -291,7 +293,8 @@ class ProjectController extends Controller
             'type' => ['sometimes', 'required', Rule::enum(ProjectType::class)],
             'docroot_subpath' => ['sometimes', 'nullable', 'string', 'max:255'],
             'keep_releases' => ['sometimes', 'required', 'integer', 'min:1', 'max:50'],
-            'auto_rollback' => ['sometimes', 'boolean'],
+            'auto_rollback_on' => ['sometimes', 'array'],
+            'auto_rollback_on.*' => [Rule::enum(RollbackTrigger::class)],
             'health_check_url' => ['sometimes', 'nullable', 'url'],
             'shared_paths' => ['sometimes', 'array'],
             'shared_paths.*' => [$this->sharedPathRule()],

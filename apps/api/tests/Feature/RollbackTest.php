@@ -30,7 +30,8 @@ beforeEach(function () {
         'shared_paths' => [],
         'keep_releases' => 5,
         'health_check_url' => 'https://demo.test/up',
-        'auto_rollback' => true, // opt in — auto-rollback is opt-in policy (docs/SPEC.md §21.2)
+        // Opt into the health-check trigger — auto-rollback is per-trigger opt-in (docs/SPEC.md §21.2).
+        'auto_rollback_on' => ['health_check'],
     ]);
 
     ['token' => $this->token] = app(ApiKeyService::class)->generate('ci', ['deploy', 'read', 'rollback'], $this->project->id);
@@ -99,7 +100,7 @@ it('requires the rollback scope', function () {
         ->assertStatus(403);
 });
 
-it('auto-rolls back when the health check fails after activation (auto_rollback on)', function () {
+it('auto-rolls back when the health check fails after activation (health_check trigger opted in)', function () {
     // First deploy healthy (200), second deploy unhealthy (500) → auto-rollback to first.
     Http::fakeSequence()->pushStatus(200)->pushStatus(500);
 
@@ -113,8 +114,8 @@ it('auto-rolls back when the health check fails after activation (auto_rollback 
         ->and(collect($res->json('data.steps'))->pluck('name')->all())->toContain('health_check', 'auto_rollback');
 });
 
-it('stays on the new release and marks it failed when the health check fails with auto_rollback off', function () {
-    $this->project->forceFill(['auto_rollback' => false])->save();
+it('stays on the new release and marks it failed when no trigger is opted in', function () {
+    $this->project->forceFill(['auto_rollback_on' => []])->save();
 
     // First deploy healthy (200), second deploy unhealthy (500) → NO swap, stay on the new release.
     Http::fakeSequence()->pushStatus(200)->pushStatus(500);
@@ -130,6 +131,22 @@ it('stays on the new release and marks it failed when the health check fails wit
         ->toContain('health_check')
         ->not->toContain('auto_rollback')
         ->and($this->project->fresh()->health_status->value)->toBe('unhealthy');
+});
+
+it('does not roll back on a failed health check when only the post_activate_hook trigger is opted in', function () {
+    // Per-trigger granularity (docs/SPEC.md §21.2): opting into post_activate_hook must NOT cause a
+    // health-check failure to roll back.
+    $this->project->forceFill(['auto_rollback_on' => ['post_activate_hook']])->save();
+
+    Http::fakeSequence()->pushStatus(200)->pushStatus(500);
+
+    ($this->deploy)('A')->assertJsonPath('data.status', 'success');
+
+    $res = ($this->deploy)('B');
+    $res->assertStatus(202)->assertJsonPath('data.status', 'failed');
+
+    expect(file_get_contents($this->base.'/current/index.html'))->toBe('B')
+        ->and(collect($res->json('data.steps'))->pluck('name')->all())->not->toContain('auto_rollback');
 });
 
 it('marks the project healthy after a passing deploy health check', function () {

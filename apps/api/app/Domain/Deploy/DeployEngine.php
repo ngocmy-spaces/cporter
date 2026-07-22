@@ -8,6 +8,7 @@ use App\Domain\Deploy\PostDeploy\PostDeployRunner;
 use App\Enums\DeploymentStatus;
 use App\Enums\ProjectHealth;
 use App\Enums\ReleaseState;
+use App\Enums\RollbackTrigger;
 use App\Models\Artifact;
 use App\Models\Deployment;
 use App\Models\Project;
@@ -23,10 +24,10 @@ use Throwable;
  *   sets status = hooks_pending and hands the lock off; the cron-worker (`cporter:run-jobs`)
  *   calls finalize() in shell context to run pre-activate hooks → activate → post-activate
  *   hooks → health → prune. If the release fails its post-activation gate (health check or a
- *   post-activate hook), the auto-rollback policy decides what happens (docs/SPEC.md §21.2):
- *   with `auto_rollback` on and a valid previous release, `current` swaps back; otherwise the
- *   new release stays live and the deployment is marked failed. Either way the project's
- *   persisted health_status is updated (docs/SPEC.md §21.1).
+ *   post-activate hook), the per-trigger auto-rollback policy decides what happens (docs/SPEC.md
+ *   §21.2): if that trigger is in the project's `auto_rollback_on` and a valid previous release
+ *   exists, `current` swaps back; otherwise the new release stays live and the deployment is marked
+ *   failed. Either way the project's persisted health_status is updated (docs/SPEC.md §21.1).
  */
 class DeployEngine
 {
@@ -147,20 +148,20 @@ class DeployEngine
         });
 
         // The new release is now live. Post-activate hooks + the health check are its activation
-        // gate; any failure is handled by the rollback policy, never re-thrown.
-        try {
-            if ($hooks) {
+        // gate; each failure is resolved by the rollback policy (never re-thrown) and carries an
+        // explicit trigger so the policy — and future triggers — stay unambiguous (docs/SPEC.md §21.2).
+        if ($hooks) {
+            try {
                 $this->runHooks($steps, $project, $release, 'post_activate');
-            }
-
-            if (! $this->healthy($steps, $project)) {
-                $this->handleActivationFailure($project, $release, $deployment, $steps);
+            } catch (Throwable) {
+                $this->handleActivationFailure($project, $release, $deployment, $steps, RollbackTrigger::PostActivateHookFailed);
 
                 return;
             }
-        } catch (Throwable) {
-            // A post-activate hook failed on the now-live release — same policy as a failed gate.
-            $this->handleActivationFailure($project, $release, $deployment, $steps);
+        }
+
+        if (! $this->healthy($steps, $project)) {
+            $this->handleActivationFailure($project, $release, $deployment, $steps, RollbackTrigger::HealthCheckFailed);
 
             return;
         }
@@ -257,22 +258,27 @@ class DeployEngine
     }
 
     /**
-     * The now-live release failed its activation gate. Apply the opt-in auto-rollback policy
-     * (docs/SPEC.md §21.2):
-     *   - `auto_rollback` on AND a single valid previous release (most-recent superseded, dir present
-     *     on disk) exists → swap `current` back → deployment = rolled_back;
-     *   - otherwise (policy off, or no valid previous) → stay on the new release, deployment = failed.
+     * The now-live release failed its activation gate for a specific reason ($trigger). Apply the
+     * per-trigger opt-in auto-rollback policy (docs/SPEC.md §21.2):
+     *   - the project opts into this trigger AND a single valid previous release (most-recent
+     *     superseded, dir present on disk) exists → swap `current` back → deployment = rolled_back;
+     *   - otherwise (trigger not opted-in, or no valid previous) → stay on the new release,
+     *     deployment = failed.
      * The project is flagged unhealthy either way. Single-shot: no multi-candidate iteration, no loop.
      */
-    private function handleActivationFailure(Project $project, Release $release, Deployment $deployment, StepRunner $steps): void
+    private function handleActivationFailure(Project $project, Release $release, Deployment $deployment, StepRunner $steps, RollbackTrigger $trigger): void
     {
         $this->healthMonitor->set($project, ProjectHealth::Unhealthy);
 
-        if ($project->auto_rollback) {
+        if ($project->shouldAutoRollback($trigger)) {
             $previous = $this->rollback->previousRelease($project, $release);
 
             if ($previous !== null && is_dir((string) $previous->path)) {
-                $steps->run('auto_rollback', fn () => $this->rollback->activateRelease($project, $previous));
+                $steps->run('auto_rollback', function () use ($project, $previous, $trigger): string {
+                    $this->rollback->activateRelease($project, $previous);
+
+                    return "Trigger: {$trigger->label()}";
+                });
                 $release->forceFill(['state' => ReleaseState::Failed])->save();
                 $deployment->forceFill(['status' => DeploymentStatus::RolledBack, 'finished_at' => now()])->save();
                 // Reverted to previously-good code; the monitor re-confirms its live health shortly.
@@ -283,7 +289,7 @@ class DeployEngine
         }
 
         // No swap: the new release stays live. `failed` is correct — the release could not be made
-        // green, and (when auto_rollback was on) the promised rollback had no valid target.
+        // green, and (when the trigger was opted-in) the promised rollback had no valid target.
         $deployment->forceFill(['status' => DeploymentStatus::Failed, 'finished_at' => now()])->save();
     }
 

@@ -301,9 +301,10 @@ Base: `https://cporter.domain/api/v1` · Auth: `Authorization: Bearer <token>`
   releases still retain copies for rollback).
 - **Migration**: do NOT run `migrate:rollback` automatically by default (data risk). Only surface a warning &
   allow a manual hook. → **[ASSUMPTION C]** rollback = code-only.
-- **Auto-rollback**: **opt-in per project** (`auto_rollback`, default off — §21.2). When on: if the Health Check step (13)
-  fails after activation and a single valid previous release exists → swap back to it, deployment `rolled_back`; if none is
-  valid → stay on the new release, deployment `failed`. When off: a failed health check just marks the deployment `failed`.
+- **Auto-rollback**: **per-trigger opt-in per project** (`auto_rollback_on`, default empty — §21.2). Each post-activation
+  failure (Health Check step 13, or a failed post-activate hook) rolls back only if its trigger is listed. When a listed
+  trigger fires and a single valid previous release exists → swap back to it, deployment `rolled_back`; if none is valid →
+  stay on the new release, deployment `failed`. A trigger not listed just marks the deployment `failed`.
 - **Rollback targets are code-only, on-disk releases**: rollback never re-extracts an artifact — it re-points `current` at an
   existing release directory, so a reclaimed artifact `.zip` (§6 step 15b) does not affect it. Releases pruned by retention
   (`pruned` state, directory gone) are **not** valid targets and are excluded from the releases list; only `active`/`superseded`
@@ -686,20 +687,23 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
   gate, and writes its result through to `health_status`.
 - Projects without a `health_check_url`, or `disabled`, are `unknown` / `paused` and never alert.
 
-### 21.2 Auto-rollback = opt-in policy (new + change)
-- New column `projects.auto_rollback` (bool, default **false**), exposed on project create/edit.
-- **Philosophy**: enabling it means *"I want the site green when the deploy finishes."* Therefore, after activation, if
-  the health check fails:
+### 21.2 Auto-rollback = per-trigger opt-in policy (new + change)
+- New column `projects.auto_rollback_on` (JSON list of trigger keys, default **empty**), exposed on project create/edit.
+  Triggers are modelled as the `RollbackTrigger` enum so the policy is explicit and extensible — today `health_check` and
+  `post_activate_hook`; a future trigger is one enum case plus its detection site, and validation + the UI pick it up
+  automatically. `Project::shouldAutoRollback(RollbackTrigger)` is the single decision point.
+- **Philosophy**: listing a trigger means *"for this failure, I want the site green when the deploy finishes."* After
+  activation, when a **listed** trigger fires:
   - a **single valid previous release** exists (most recent `superseded`, directory present on disk) → swap `current`
-    back to it → `deployment = rolled_back`;
+    back to it → `deployment = rolled_back` (project health → `unknown`, re-confirmed by the monitor);
   - **no** valid previous exists (e.g. `keep_releases = 1`, or the previous directory is gone) → **stay on the new
     release**, no loop, no error → `deployment = failed`. `failed` is correct: auto-rollback promised green and could
     not deliver it. `health_status` is set `unhealthy` and alerted.
-- `auto_rollback = false` (default): no automatic swap; a failed health check just marks the deployment `failed` and the
-  project `unhealthy`.
-- **Narrowed trigger**: only a failed health check triggers auto-rollback. Post-deploy `prune` / `diskStats` failures are
-  demoted to **non-fatal** warnings (like the post-deploy tasks) — they never roll back a healthy live release. *(Fixes the
-  over-aggressive rollback noted in §20.3.)*
+- Trigger **not listed** (or `auto_rollback_on` empty): no automatic swap; the failure just marks the deployment `failed`
+  and the project `unhealthy`.
+- **Triggers are explicit, not blanket.** Only the two modelled post-activation failures can roll back. Post-deploy
+  `prune` / `diskStats` failures are demoted to **non-fatal** warnings (like the post-deploy tasks) — they never roll back
+  a live release. *(Fixes the over-aggressive rollback noted in §20.3.)*
 - Target selection is **single-shot with an on-disk validity check** — no multi-candidate iteration (deliberate simplicity).
 
 ### 21.3 Manual rollback stays code-only (decision)

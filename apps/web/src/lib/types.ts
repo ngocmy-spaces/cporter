@@ -7,6 +7,8 @@ export type ProjectType = 'static' | 'laravel' | 'php' | 'node' | 'wordpress';
 export type ProjectStatus = 'active' | 'disabled' | 'deleting';
 /** Continuously-monitored project health (docs/SPEC.md §21.1). Only `unhealthy` raises an alert. */
 export type ProjectHealthStatus = 'healthy' | 'unhealthy' | 'unknown' | 'paused';
+/** Post-activation failures the auto-rollback policy can react to (docs/SPEC.md §21.2). */
+export type RollbackTrigger = 'health_check' | 'post_activate_hook';
 
 export type DeploymentStatus =
   | 'queued'
@@ -82,8 +84,8 @@ export interface Project {
   type: ProjectType;
   docroot_subpath: string | null;
   keep_releases: number;
-  /** When true, a failed post-activation health check rolls back to the previous release (docs/SPEC.md §21.2). */
-  auto_rollback: boolean;
+  /** Opt-in failures that trigger an automatic rollback; empty = disabled (docs/SPEC.md §21.2). */
+  auto_rollback_on: RollbackTrigger[];
   /** Live footprint in bytes: active release (`current`) + shared/. */
   disk_usage: number;
   /** Total bytes of all retained release directories (rollback history). */

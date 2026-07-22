@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\ProjectHealth;
 use App\Enums\ProjectStatus;
 use App\Enums\ProjectType;
+use App\Enums\RollbackTrigger;
 use Database\Factories\ProjectFactory;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -31,7 +32,7 @@ class Project extends Model
         'type',
         'docroot_subpath',
         'keep_releases',
-        'auto_rollback',
+        'auto_rollback_on',
         'disk_usage',
         'releases_disk_usage',
         'disk_usage_status',
@@ -68,7 +69,6 @@ class Project extends Model
         'status' => 'active',
         'health_status' => 'unknown',
         'keep_releases' => 5,
-        'auto_rollback' => false,
     ];
 
     /**
@@ -81,7 +81,6 @@ class Project extends Model
             'status' => ProjectStatus::class,
             'health_status' => ProjectHealth::class,
             'keep_releases' => 'integer',
-            'auto_rollback' => 'boolean',
             'disk_usage' => 'integer',
             'releases_disk_usage' => 'integer',
             'disk_usage_started_at' => 'datetime',
@@ -227,6 +226,45 @@ class Project extends Model
             array_keys($out),
             array_values($out),
         );
+    }
+
+    /**
+     * auto_rollback_on is the opt-in list of failures that trigger an automatic rollback
+     * (docs/SPEC.md §21.2), stored as a JSON list of RollbackTrigger values. Unknown/blank entries
+     * are dropped and duplicates de-duped on both read and write, so an out-of-date UI or a removed
+     * trigger can never persist junk. Empty list = auto-rollback disabled.
+     */
+    protected function autoRollbackOn(): Attribute
+    {
+        return Attribute::make(
+            get: fn (?string $value): array => self::normalizeRollbackTriggers(json_decode($value ?? '[]', true) ?: []),
+            set: fn ($value): string => (string) json_encode(self::normalizeRollbackTriggers($value)),
+        );
+    }
+
+    /**
+     * @param  mixed  $raw
+     * @return list<string>
+     */
+    public static function normalizeRollbackTriggers($raw): array
+    {
+        $valid = RollbackTrigger::values();
+        $out = [];
+
+        foreach (is_array($raw) ? $raw : [] as $item) {
+            $value = $item instanceof RollbackTrigger ? $item->value : (is_string($item) ? trim($item) : null);
+            if ($value !== null && in_array($value, $valid, true) && ! in_array($value, $out, true)) {
+                $out[] = $value;
+            }
+        }
+
+        return $out;
+    }
+
+    /** Whether this project's policy rolls back on the given post-activation failure (docs/SPEC.md §21.2). */
+    public function shouldAutoRollback(RollbackTrigger $trigger): bool
+    {
+        return in_array($trigger->value, $this->auto_rollback_on ?? [], true);
     }
 
     public function getRouteKeyName(): string

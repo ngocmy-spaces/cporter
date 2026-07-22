@@ -2,6 +2,7 @@ import {
   ActionIcon,
   Badge,
   Button,
+  Checkbox,
   Code,
   Group,
   Modal,
@@ -12,7 +13,6 @@ import {
   Select,
   Skeleton,
   Stack,
-  Switch,
   Table,
   Text,
   TextInput,
@@ -56,6 +56,12 @@ const SHARED_PATH_TYPES = [
   { value: 'file', label: 'File' },
 ];
 
+/** Per-trigger auto-rollback options (docs/SPEC.md §21.2); mirrors App\Enums\RollbackTrigger. */
+const ROLLBACK_TRIGGER_OPTIONS = [
+  { value: 'health_check', label: 'Failed health check' },
+  { value: 'post_activate_hook', label: 'Failed post-activate hook' },
+];
+
 const STATUS_FILTERS = [
   { value: 'all', label: 'All' },
   { value: 'active', label: 'Active' },
@@ -70,7 +76,7 @@ interface ProjectFormValues {
   type: string;
   docroot_subpath: string;
   keep_releases: number;
-  auto_rollback: boolean;
+  auto_rollback_on: string[];
   health_check_url: string;
   shared_paths: SharedPath[];
 }
@@ -82,7 +88,7 @@ const INITIAL_VALUES: ProjectFormValues = {
   type: 'static',
   docroot_subpath: '',
   keep_releases: 5,
-  auto_rollback: false,
+  auto_rollback_on: [],
   health_check_url: '',
   shared_paths: [],
 };
@@ -180,7 +186,7 @@ export function ProjectsPage() {
         type: values.type,
         docroot_subpath: values.docroot_subpath || undefined,
         keep_releases: values.keep_releases,
-        auto_rollback: values.auto_rollback,
+        auto_rollback_on: values.auto_rollback_on,
         health_check_url: values.health_check_url || undefined,
         shared_paths: values.shared_paths
           .map((entry) => ({ path: entry.path.trim(), type: entry.type }))
@@ -463,11 +469,17 @@ export function ProjectsPage() {
               description="Polled after each activation and continuously monitored on a schedule. Leave empty to skip."
               {...form.getInputProps('health_check_url')}
             />
-            <Switch
-              label="Auto-rollback on failed health check"
-              description="If the post-activation health check fails, roll back to the previous release. Off by default — a failure just marks the deploy failed and the project unhealthy."
-              {...form.getInputProps('auto_rollback', { type: 'checkbox' })}
-            />
+            <Checkbox.Group
+              label="Auto-rollback on"
+              description="Which post-activation failures roll the release back to the previous one. None selected = disabled; a failure then just marks the deploy failed and the project unhealthy."
+              {...form.getInputProps('auto_rollback_on')}
+            >
+              <Stack gap="xs" mt="xs">
+                {ROLLBACK_TRIGGER_OPTIONS.map((t) => (
+                  <Checkbox key={t.value} value={t.value} label={t.label} />
+                ))}
+              </Stack>
+            </Checkbox.Group>
             <Stack gap="xs">
               <Text size="sm" fw={500}>
                 Shared paths
