@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ProjectHealth;
 use App\Enums\ProjectStatus;
 use App\Enums\ProjectType;
 use Database\Factories\ProjectFactory;
@@ -30,6 +31,7 @@ class Project extends Model
         'type',
         'docroot_subpath',
         'keep_releases',
+        'auto_rollback',
         'disk_usage',
         'releases_disk_usage',
         'disk_usage_status',
@@ -37,6 +39,9 @@ class Project extends Model
         'disk_usage_calculated_at',
         'shared_disk_usage',
         'health_check_url',
+        'health_status',
+        'health_checked_at',
+        'health_last_ok_at',
         'shared_paths',
         'hooks',
         'env_vars',
@@ -61,7 +66,9 @@ class Project extends Model
     protected $attributes = [
         'type' => 'static',
         'status' => 'active',
+        'health_status' => 'unknown',
         'keep_releases' => 5,
+        'auto_rollback' => false,
     ];
 
     /**
@@ -72,11 +79,15 @@ class Project extends Model
         return [
             'type' => ProjectType::class,
             'status' => ProjectStatus::class,
+            'health_status' => ProjectHealth::class,
             'keep_releases' => 'integer',
+            'auto_rollback' => 'boolean',
             'disk_usage' => 'integer',
             'releases_disk_usage' => 'integer',
             'disk_usage_started_at' => 'datetime',
             'disk_usage_calculated_at' => 'datetime',
+            'health_checked_at' => 'datetime',
+            'health_last_ok_at' => 'datetime',
             'shared_disk_usage' => 'array',
         ];
     }

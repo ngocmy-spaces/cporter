@@ -1,5 +1,5 @@
 import { Badge } from '@mantine/core';
-import type { DeploymentStatus, ReleaseState } from '@/lib/types';
+import type { DeploymentStatus, ProjectHealthStatus, ReleaseState } from '@/lib/types';
 
 const DEPLOYMENT_COLORS: Record<DeploymentStatus, string> = {
   success: 'green',
@@ -32,6 +32,21 @@ export function ReleaseStateBadge({ state }: { state: ReleaseState }) {
   return (
     <Badge color={RELEASE_COLORS[state]} variant="light">
       {state}
+    </Badge>
+  );
+}
+
+const HEALTH_COLORS: Record<ProjectHealthStatus, string> = {
+  healthy: 'green',
+  unhealthy: 'red',
+  unknown: 'gray',
+  paused: 'gray',
+};
+
+export function ProjectHealthBadge({ status }: { status: ProjectHealthStatus }) {
+  return (
+    <Badge color={HEALTH_COLORS[status]} variant="light">
+      {status}
     </Badge>
   );
 }

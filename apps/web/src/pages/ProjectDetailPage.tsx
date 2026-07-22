@@ -20,6 +20,7 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Switch,
   Table,
   Tabs,
   Text,
@@ -56,7 +57,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { notifyError, applyFormErrors } from '@/lib/feedback';
 import { DeploymentDrawer } from '@/components/DeploymentDrawer';
 import { ProjectEnvPanel } from '@/components/ProjectEnvPanel';
-import { DeploymentStatusBadge, ReleaseStateBadge } from '@/components/StatusBadge';
+import { DeploymentStatusBadge, ProjectHealthBadge, ReleaseStateBadge } from '@/components/StatusBadge';
 import { ReleaseVersion } from '@/components/ReleaseVersion';
 import { formatBytes, formatDateTime, formatRelativeTime } from '@/lib/format';
 import type {
@@ -97,7 +98,7 @@ const HOOK_STAGES = [
     key: 'post_activate' as const,
     label: 'Post-activate hooks',
     helper:
-      'Run after the release is live (e.g. php artisan queue:restart). If one fails, cPorter auto-rolls back to the previous release.',
+      'Run after the release is live (e.g. php artisan queue:restart). If one fails, the deploy is marked failed and the project unhealthy; with auto-rollback on, cPorter rolls back to the previous release.',
   },
 ];
 
@@ -166,6 +167,7 @@ interface ProjectEditFormValues {
   type: string;
   docroot_subpath: string;
   keep_releases: number;
+  auto_rollback: boolean;
   health_check_url: string;
   shared_paths: SharedPath[];
   hooks: { pre_activate: string[]; post_activate: string[] };
@@ -176,6 +178,7 @@ const EDIT_INITIAL_VALUES: ProjectEditFormValues = {
   type: 'static',
   docroot_subpath: '',
   keep_releases: 5,
+  auto_rollback: false,
   health_check_url: '',
   shared_paths: [],
   hooks: { pre_activate: [], post_activate: [] },
@@ -274,8 +277,8 @@ export function ProjectDetailPage() {
     onSuccess: () => {
       notifications.show({
         color: 'green',
-        title: 'Release activated',
-        message: 'The release is now active.',
+        title: 'Rolled back',
+        message: 'The selected release is now live.',
         icon: <IconCheck size={16} />,
       });
       // Prefix invalidation refreshes the project payload (Overview's live-release/last-deploy
@@ -345,15 +348,16 @@ export function ProjectDetailPage() {
     },
   });
 
-  const confirmActivate = (release: Release) => {
+  const confirmRollback = (release: Release) => {
     modals.openConfirmModal({
-      title: 'Activate release',
+      title: 'Roll back to this release',
       children: (
         <Text size="sm">
-          Activate version {release.version}? This will roll the live site to this release.
+          Roll the live site back to version {release.version}? This is a code-only symlink swap — no
+          hooks run and health is re-checked by continuous monitoring, not inline.
         </Text>
       ),
-      labels: { confirm: 'Activate', cancel: 'Cancel' },
+      labels: { confirm: 'Roll back', cancel: 'Cancel' },
       confirmProps: { color: 'indigo' },
       onConfirm: () => activate.mutate(release.id),
     });
@@ -371,6 +375,7 @@ export function ProjectDetailPage() {
         type: values.type,
         docroot_subpath: values.docroot_subpath || null,
         keep_releases: values.keep_releases,
+        auto_rollback: values.auto_rollback,
         health_check_url: values.health_check_url || null,
         shared_paths: values.shared_paths
           .map((entry) => ({ path: entry.path.trim(), type: entry.type }))
@@ -554,6 +559,7 @@ export function ProjectDetailPage() {
       type: p.type,
       docroot_subpath: p.docroot_subpath ?? '',
       keep_releases: p.keep_releases,
+      auto_rollback: p.auto_rollback ?? false,
       health_check_url: p.health_check_url ?? '',
       shared_paths: p.shared_paths ?? [],
       hooks: {
@@ -711,6 +717,21 @@ export function ProjectDetailPage() {
                 </Text>
               )}
             </Info>
+            <Info label="Health">
+              <Group gap="xs" align="center">
+                <ProjectHealthBadge status={p.health_status} />
+                {p.auto_rollback && (
+                  <Badge size="xs" variant="light" color="indigo">
+                    auto-rollback
+                  </Badge>
+                )}
+              </Group>
+              <Text size="xs" c="dimmed">
+                {p.health_checked_at
+                  ? `checked ${formatRelativeTime(p.health_checked_at)}`
+                  : 'not checked yet'}
+              </Text>
+            </Info>
             <Info label="Docroot subpath">
               <Text size="sm">{p.docroot_subpath || '—'}</Text>
             </Info>
@@ -829,9 +850,9 @@ export function ProjectDetailPage() {
           <Paper withBorder radius="md">
             <PanelBody query={releases} errorTitle="Couldn't load releases">
               <Text size="xs" c="dimmed" p="md" pb={0}>
-                Only releases currently kept on disk are shown (bounded by <b>keep releases</b>) —
-                these are the ones you can activate or roll back to. For the full deployment
-                history, see the Deployments tab.
+                The <b>Live</b> release is the code version currently applied; each other release is a
+                version you can <b>roll back</b> to. Only releases still on disk are shown (bounded by{' '}
+                <b>keep releases</b>) — for the full deployment history, see the Deployments tab.
               </Text>
               <Table.ScrollContainer minWidth={600}>
                 <Table highlightOnHover verticalSpacing="sm">
@@ -865,12 +886,12 @@ export function ProjectDetailPage() {
                         <Table.Td align="center">
                           {r.state === 'active' ? (
                             <Badge size="xs" color="green" variant="filled">
-                              live
+                              Live
                             </Badge>
                           ) : (
                             isAdmin && (
-                              <Button size="xs" variant="light" onClick={() => confirmActivate(r)}>
-                                Activate
+                              <Button size="xs" variant="light" onClick={() => confirmRollback(r)}>
+                                Rollback
                               </Button>
                             )
                           )}
@@ -1024,8 +1045,13 @@ export function ProjectDetailPage() {
             <TextInput
               label="Health check URL"
               placeholder="https://example.com/health"
-              description="Polled after each activation; if it fails, cPorter auto-rolls back to the previous release. Leave empty to skip."
+              description="Polled after each activation and continuously monitored on a schedule. Leave empty to skip."
               {...editForm.getInputProps('health_check_url')}
+            />
+            <Switch
+              label="Auto-rollback on failed health check"
+              description="If the post-activation health check fails, roll back to the previous release. Off by default — a failure just marks the deploy failed and the project unhealthy."
+              {...editForm.getInputProps('auto_rollback', { type: 'checkbox' })}
             />
             <Stack gap="xs">
               <Text size="sm" fw={500}>

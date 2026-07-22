@@ -5,6 +5,8 @@
 
 export type ProjectType = 'static' | 'laravel' | 'php' | 'node' | 'wordpress';
 export type ProjectStatus = 'active' | 'disabled' | 'deleting';
+/** Continuously-monitored project health (docs/SPEC.md §21.1). Only `unhealthy` raises an alert. */
+export type ProjectHealthStatus = 'healthy' | 'unhealthy' | 'unknown' | 'paused';
 
 export type DeploymentStatus =
   | 'queued'
@@ -80,6 +82,8 @@ export interface Project {
   type: ProjectType;
   docroot_subpath: string | null;
   keep_releases: number;
+  /** When true, a failed post-activation health check rolls back to the previous release (docs/SPEC.md §21.2). */
+  auto_rollback: boolean;
   /** Live footprint in bytes: active release (`current`) + shared/. */
   disk_usage: number;
   /** Total bytes of all retained release directories (rollback history). */
@@ -90,6 +94,10 @@ export interface Project {
   /** Per-shared-path size in bytes, keyed by the entry's relative path; null until first computed. */
   shared_disk_usage: Record<string, number> | null;
   health_check_url: string | null;
+  /** Persisted health signal — the single source dashboard/alerts read (docs/SPEC.md §21.1). */
+  health_status: ProjectHealthStatus;
+  health_checked_at: string | null;
+  health_last_ok_at: string | null;
   shared_paths: SharedPath[];
   hooks: ProjectHooks | null;
   status: ProjectStatus;

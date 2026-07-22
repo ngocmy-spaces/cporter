@@ -293,15 +293,17 @@ Base: `https://cporter.domain/api/v1` · Auth: `Authorization: Bearer <token>`
 ## 8. Rollback Engine
 
 - **Fast (default)**: swap `current` back to the previous release (the most recent `superseded`) or a specified release →
-  atomic symlink swap (create `current.tmp` then `rename`). Run post-activate hooks (cache clear). Health check.
+  atomic symlink swap (create `current.tmp` then `rename`). **Manual rollback is code-only — no hooks, no health re-check
+  (revised in §21.3).** Post-rollback health is observed continuously via `project.health_status` (§21.1).
 - **Swap mechanism & fallback**: the standard mechanism is **symlink swap** (`symlink()` + `rename()`). If the probe
   detects that the host **forbids symlinks**, fall back to **rename-swap of the folder**: `rename(current → current.old)` then
   `rename(releases/<id> → current)` (there is a very brief gap, acceptable for hosts that do not support symlinks;
   releases still retain copies for rollback).
 - **Migration**: do NOT run `migrate:rollback` automatically by default (data risk). Only surface a warning &
   allow a manual hook. → **[ASSUMPTION C]** rollback = code-only.
-- **Auto-rollback**: if the Health Check step (13) fails after activation → automatically swap the symlink back to the old release,
-  marking the deployment `rolled_back`.
+- **Auto-rollback**: **opt-in per project** (`auto_rollback`, default off — §21.2). When on: if the Health Check step (13)
+  fails after activation and a single valid previous release exists → swap back to it, deployment `rolled_back`; if none is
+  valid → stay on the new release, deployment `failed`. When off: a failed health check just marks the deployment `failed`.
 - **Rollback targets are code-only, on-disk releases**: rollback never re-extracts an artifact — it re-points `current` at an
   existing release directory, so a reclaimed artifact `.zip` (§6 step 15b) does not affect it. Releases pruned by retention
   (`pruned` state, directory gone) are **not** valid targets and are excluded from the releases list; only `active`/`superseded`
@@ -636,7 +638,7 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 ### 20.3 Rollback engine (§8)
 | Kind | Item | Reality |
 |---|---|---|
-| B | Rollback runs **only** the symlink swap | It **skips post-activate hooks (cache clear) and the health-check re-run** that §8 specifies. Risk: rolling back to a release that is itself unhealthy goes unnoticed, and Laravel caches aren't refreshed. **Highest-value backlog item.** |
+| ✅ | Rollback runs **only** the symlink swap | **Resolved by design (§21.3):** manual rollback stays code-only intentionally; post-rollback health moves to continuous monitoring (§21.1). Auto-rollback becomes opt-in with single-valid-target-or-stay policy (§21.2). |
 | D | Symlink-forbidden fallback | Implemented as **copy-swap** (copy release into `current`, keep `releases/<id>` immutable), not the rename-swap described in §8. Behaviour is equivalent and safe. |
 
 ### 20.4 Command execution (§9)
@@ -650,7 +652,7 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 | Kind | Item | Reality |
 |---|---|---|
 | D | Enums grew | `Deployment.status` adds `hooks_pending`; `Deployment.trigger` adds `webhook`; `Project.type` adds `wordpress`; `Project.status` adds `deleting` (transient: a disk purge is running; the row is soft-deleted once it finishes); `Release.state` adds `pruned` (directory reclaimed by retention; row kept for history, hidden from the releases list). |
-| D | Artifact retention | `Artifact` gains `pruned_at`; the `.zip` is reclaimed after a stable deploy (keep only the live release's), nulling `storage_path` while keeping the row for reporting (§6 step 15b). Driven by a post-deploy task flow + the housekeeper (`ArtifactPruner`), gated by `CPORTER_PRUNE_ARTIFACTS`. Release retention now also marks pruned rows in the DB (`ReleasePruner`) and is applied immediately when `keep_releases` is lowered — which is blocked if it would strand the live release. |
+| D | Artifact retention | `Artifact` gains `pruned_at`; the `.zip` is reclaimed after a stable deploy (keep only the live release's), nulling `storage_path` while keeping the row for reporting (§6 step 15b). Driven by a post-deploy task flow + the housekeeper (`ArtifactPruner`), gated by `CPORTER_PRUNE_ARTIFACTS`. Release retention now also marks pruned rows in the DB (`ReleasePruner`) and is applied immediately when `keep_releases` is lowered. *(v1.1 §21.4: lowering `keep_releases` no longer blocks when the live release is outside the window — the active release is always kept and the count re-converges on the next deploy.)* |
 | D | Persisted fields | `Deployment.idempotency_key` is a real column with a unique `(project_id, idempotency_key)` index; a `settings` key/value table exists (probe/config). `Project` is **soft-deleted** (`deleted_at`) — a delete keeps deploy/audit history; disk reclamation is a separate opt-in (`PurgeProjectJob`). |
 | D | `Release`→`Artifact` | `artifact_id` is **nullable** (effectively `*—1 optional`, not strict `1—1`). |
 | D | `hooks` validation/normalization | `Project.hooks` is structurally validated (only `pre_activate`/`post_activate` stages; each a list of ≤1000-char command strings) and normalized on write (trim, drop blanks/empty stages → `{}`), mirroring `shared_paths`. Previously stored as a shapeless array. |
@@ -666,3 +668,53 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 - Deploy lock has a **TTL steal** for stale locks.
 - **Idempotency** is fully implemented (§6/§7 only mentioned the header).
 - Path jail is thorough (lexical normalize + `realpath` ancestor resolution + null-byte reject).
+
+---
+
+## 21. v1.1 — Release control, health monitoring & rollback policy (implemented)
+
+> Decided 2026-07-22 in review; **shipped in v1.1** (TASKS.md Phase 6, Milestone M6). Reframes rollback from an implicit deploy-time safety net into an
+> **explicit, user-controlled policy**, and promotes project health to a **continuously-monitored,
+> persisted signal**. Supersedes the §20.3 backlog and revises §8.
+
+### 21.1 Continuous project health (new)
+- New columns: `projects.health_status` (`healthy | unhealthy | unknown | paused`), `health_checked_at`, `health_last_ok_at`.
+- New scheduled command `cporter:check-health` (driven by the existing `schedule:run` cron, ~every 1–5 min) polls every
+  `active` project that has a `health_check_url` and writes the result to `health_status`.
+- **Single source of truth**: every consumer (dashboard alerts, deploy-gate note, auto-rollback decision) reads
+  `project.health_status` directly instead of re-probing. The deploy-time health check still runs as the activation
+  gate, and writes its result through to `health_status`.
+- Projects without a `health_check_url`, or `disabled`, are `unknown` / `paused` and never alert.
+
+### 21.2 Auto-rollback = opt-in policy (new + change)
+- New column `projects.auto_rollback` (bool, default **false**), exposed on project create/edit.
+- **Philosophy**: enabling it means *"I want the site green when the deploy finishes."* Therefore, after activation, if
+  the health check fails:
+  - a **single valid previous release** exists (most recent `superseded`, directory present on disk) → swap `current`
+    back to it → `deployment = rolled_back`;
+  - **no** valid previous exists (e.g. `keep_releases = 1`, or the previous directory is gone) → **stay on the new
+    release**, no loop, no error → `deployment = failed`. `failed` is correct: auto-rollback promised green and could
+    not deliver it. `health_status` is set `unhealthy` and alerted.
+- `auto_rollback = false` (default): no automatic swap; a failed health check just marks the deployment `failed` and the
+  project `unhealthy`.
+- **Narrowed trigger**: only a failed health check triggers auto-rollback. Post-deploy `prune` / `diskStats` failures are
+  demoted to **non-fatal** warnings (like the post-deploy tasks) — they never roll back a healthy live release. *(Fixes the
+  over-aggressive rollback noted in §20.3.)*
+- Target selection is **single-shot with an on-disk validity check** — no multi-candidate iteration (deliberate simplicity).
+
+### 21.3 Manual rollback stays code-only (decision)
+- The Releases-tab Rollback/Activate action and `POST /projects/{slug}/rollback` remain a **code-only symlink swap** — no
+  hooks, no health re-check — **by design**. An operator triggering a rollback wants the previous code live immediately;
+  cache refresh is their call (a manual hook), and post-rollback health is observed via §21.1, not gated inline.
+- This resolves the §20.3 *"rollback skips hooks/health"* item as **won't-fix by design**, replaced by continuous health (§21.1).
+
+### 21.4 `keep_releases` edit no longer blocks (change)
+- Lowering `keep_releases` while the live release sits outside the new window **no longer errors** — the edit is always allowed.
+- Pruning already never deletes the active release; the releases list may temporarily hold more than `keep_releases` entries.
+  Normal retention re-converges on the next deploy, or when a newer release is activated (the live release returns to the top).
+- Removes the `assertKeepReleasesAllowed` guard; the §20.5 note *"which is blocked if it would strand the live release"* no longer applies.
+
+### 21.5 Releases tab (UX)
+- Driven by the on-disk releases (`active` + `superseded`, post-reconcile) — *"what code is deployable right now"*.
+- The `active` release shows a static **Live** badge (no self-targeting Activate button); each `superseded` release shows a
+  **Rollback** action. Goal: at a glance the operator sees which code version is applied and which versions are available to switch to.

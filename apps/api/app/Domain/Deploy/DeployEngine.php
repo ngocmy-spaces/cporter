@@ -6,6 +6,7 @@ use App\Adapters\Command\CommandRunner;
 use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Deploy\PostDeploy\PostDeployRunner;
 use App\Enums\DeploymentStatus;
+use App\Enums\ProjectHealth;
 use App\Enums\ReleaseState;
 use App\Models\Artifact;
 use App\Models\Deployment;
@@ -21,7 +22,11 @@ use Throwable;
  * - Hook projects (Laravel): the web/queue side STAGES (lock → extract → link → validate),
  *   sets status = hooks_pending and hands the lock off; the cron-worker (`cporter:run-jobs`)
  *   calls finalize() in shell context to run pre-activate hooks → activate → post-activate
- *   hooks → health → prune. A failed health check (or post-activate hook) auto-rolls back.
+ *   hooks → health → prune. If the release fails its post-activation gate (health check or a
+ *   post-activate hook), the auto-rollback policy decides what happens (docs/SPEC.md §21.2):
+ *   with `auto_rollback` on and a valid previous release, `current` swaps back; otherwise the
+ *   new release stays live and the deployment is marked failed. Either way the project's
+ *   persisted health_status is updated (docs/SPEC.md §21.1).
  */
 class DeployEngine
 {
@@ -32,6 +37,7 @@ class DeployEngine
         private readonly CommandRunner $commands,
         private readonly ReleasePruner $releasePruner,
         private readonly PostDeployRunner $postDeploy,
+        private readonly ProjectHealthMonitor $healthMonitor,
     ) {}
 
     public function deploy(Deployment $deployment): Deployment
@@ -119,34 +125,53 @@ class DeployEngine
     }
 
     /**
-     * Shared activation phase: (pre-hooks) → activate → (post-hooks) → health → prune, with
-     * auto-rollback if anything after activation fails.
+     * Shared activation phase: (pre-hooks) → activate → (post-hooks) → health → prune.
+     *
+     * A pre-activate hook failure aborts before activation and propagates out (the caller marks the
+     * deployment failed with the old release still live). Once activated, the new release is LIVE, so
+     * a failure past that point is never re-thrown — it is resolved by the auto-rollback policy
+     * (docs/SPEC.md §21.2). Post-deploy housekeeping (prune / disk stats / post-deploy tasks) is
+     * non-fatal and never rolls back a healthy release.
      */
     private function runActivationPhase(StepRunner $steps, Project $project, Release $release, Deployment $deployment, bool $hooks = false): void
     {
-        $activated = false;
+        if ($hooks) {
+            // Before activation: a failure here leaves the old release live, so let it propagate.
+            $this->runHooks($steps, $project, $release, 'pre_activate');
+        }
 
+        $steps->run('activate', function () use ($release, $project) {
+            $this->storage->activate($release->path, $this->currentLink($project));
+            $this->supersedeOthers($project, $release);
+            $release->forceFill(['state' => ReleaseState::Active, 'activated_at' => now()])->save();
+        });
+
+        // The new release is now live. Post-activate hooks + the health check are its activation
+        // gate; any failure is handled by the rollback policy, never re-thrown.
         try {
-            if ($hooks) {
-                $this->runHooks($steps, $project, $release, 'pre_activate');
-            }
-
-            $steps->run('activate', function () use ($release, $project) {
-                $this->storage->activate($release->path, $this->currentLink($project));
-                $this->supersedeOthers($project, $release);
-                $release->forceFill(['state' => ReleaseState::Active, 'activated_at' => now()])->save();
-            });
-            $activated = true;
-
             if ($hooks) {
                 $this->runHooks($steps, $project, $release, 'post_activate');
             }
 
             if (! $this->healthy($steps, $project)) {
-                throw new DeployException("Health check failed: {$project->health_check_url}");
-            }
+                $this->handleActivationFailure($project, $release, $deployment, $steps);
 
-            $steps->run('prune', fn () => $this->releasePruner->prune($project, $project->keep_releases));
+                return;
+            }
+        } catch (Throwable) {
+            // A post-activate hook failed on the now-live release — same policy as a failed gate.
+            $this->handleActivationFailure($project, $release, $deployment, $steps);
+
+            return;
+        }
+
+        // Live + healthy. Mark success first, then run housekeeping that must never fail the deploy
+        // or roll back a healthy release (docs/SPEC.md §21.2): retention prune, disk stats, and the
+        // post-deploy tasks (artifact cleanup today; notifications/triggers can be added later).
+        $deployment->forceFill(['status' => DeploymentStatus::Success])->save();
+
+        $this->nonFatal($steps, 'prune', fn () => $this->releasePruner->prune($project, $project->keep_releases));
+        $this->nonFatal($steps, 'disk_stats', function () use ($project) {
             $stats = $this->storage->diskStats($project->base_path);
             $project->forceFill([
                 'disk_usage' => $stats['current'],
@@ -154,19 +179,23 @@ class DeployEngine
                 'shared_disk_usage' => $this->storage->sharedPathSizes($project->base_path, $project->shared_paths ?? []),
                 'disk_usage_calculated_at' => now(),
             ])->save();
+        });
 
-            // The deploy is done + stable. Mark it successful, then run non-fatal post-deploy tasks
-            // (artifact cleanup today; notifications/triggers can be added via config later).
-            $deployment->forceFill(['status' => DeploymentStatus::Success])->save();
-            $this->postDeploy->run($steps, $project, $release, $deployment);
-            $deployment->forceFill(['finished_at' => now()])->save();
+        $this->postDeploy->run($steps, $project, $release, $deployment);
+        $deployment->forceFill(['finished_at' => now()])->save();
+    }
+
+    /**
+     * Run a post-success housekeeping step that must never fail the deploy: on error it is recorded
+     * as a warning and the pipeline continues (docs/SPEC.md §21.2).
+     */
+    private function nonFatal(StepRunner $steps, string $name, callable $fn): void
+    {
+        try {
+            $fn();
+            $steps->record($name, true);
         } catch (Throwable $e) {
-            if ($activated) {
-                $this->autoRollback($project, $release, $deployment, $steps);
-
-                return;
-            }
-            throw $e;
+            $steps->warn($name, "Skipped (non-fatal): {$e->getMessage()}");
         }
     }
 
@@ -209,6 +238,11 @@ class DeployEngine
         return strlen($output) > $max ? '…'.substr($output, -$max) : $output;
     }
 
+    /**
+     * The deploy-time health gate (docs/SPEC.md §6). Also writes the result through to the project's
+     * persisted health_status so the dashboard/alerts read one source (docs/SPEC.md §21.1). A project
+     * with no health_check_url can't be verified — treated as healthy for the gate, health untouched.
+     */
     private function healthy(StepRunner $steps, Project $project): bool
     {
         if (! filled($project->health_check_url)) {
@@ -216,25 +250,41 @@ class DeployEngine
         }
 
         $ok = $this->health->check($project->health_check_url, (int) config('cporter.health_check.timeout', 30));
+        $this->healthMonitor->set($project, $ok ? ProjectHealth::Healthy : ProjectHealth::Unhealthy);
         $steps->record('health_check', $ok, $ok ? null : "Health check failed: {$project->health_check_url}");
 
         return $ok;
     }
 
-    private function autoRollback(Project $project, Release $release, Deployment $deployment, StepRunner $steps): void
+    /**
+     * The now-live release failed its activation gate. Apply the opt-in auto-rollback policy
+     * (docs/SPEC.md §21.2):
+     *   - `auto_rollback` on AND a single valid previous release (most-recent superseded, dir present
+     *     on disk) exists → swap `current` back → deployment = rolled_back;
+     *   - otherwise (policy off, or no valid previous) → stay on the new release, deployment = failed.
+     * The project is flagged unhealthy either way. Single-shot: no multi-candidate iteration, no loop.
+     */
+    private function handleActivationFailure(Project $project, Release $release, Deployment $deployment, StepRunner $steps): void
     {
-        $previous = $this->rollback->previousRelease($project, $release);
+        $this->healthMonitor->set($project, ProjectHealth::Unhealthy);
 
-        if ($previous === null) {
-            $release->forceFill(['state' => ReleaseState::Failed])->save();
-            $deployment->forceFill(['status' => DeploymentStatus::Failed, 'finished_at' => now()])->save();
+        if ($project->auto_rollback) {
+            $previous = $this->rollback->previousRelease($project, $release);
 
-            return;
+            if ($previous !== null && is_dir((string) $previous->path)) {
+                $steps->run('auto_rollback', fn () => $this->rollback->activateRelease($project, $previous));
+                $release->forceFill(['state' => ReleaseState::Failed])->save();
+                $deployment->forceFill(['status' => DeploymentStatus::RolledBack, 'finished_at' => now()])->save();
+                // Reverted to previously-good code; the monitor re-confirms its live health shortly.
+                $this->healthMonitor->set($project, ProjectHealth::Unknown);
+
+                return;
+            }
         }
 
-        $steps->run('auto_rollback', fn () => $this->rollback->activateRelease($project, $previous));
-        $release->forceFill(['state' => ReleaseState::Failed])->save();
-        $deployment->forceFill(['status' => DeploymentStatus::RolledBack, 'finished_at' => now()])->save();
+        // No swap: the new release stays live. `failed` is correct — the release could not be made
+        // green, and (when auto_rollback was on) the promised rollback had no valid target.
+        $deployment->forceFill(['status' => DeploymentStatus::Failed, 'finished_at' => now()])->save();
     }
 
     private function needsHooks(Project $project): bool

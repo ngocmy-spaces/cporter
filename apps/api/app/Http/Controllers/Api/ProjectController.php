@@ -118,6 +118,7 @@ class ProjectController extends Controller
             'type' => ['required', Rule::enum(ProjectType::class)],
             'docroot_subpath' => ['nullable', 'string', 'max:255'],
             'keep_releases' => ['nullable', 'integer', 'min:1', 'max:50'],
+            'auto_rollback' => ['nullable', 'boolean'],
             'health_check_url' => ['nullable', 'url'],
             'shared_paths' => ['array'],
             'shared_paths.*' => [$this->sharedPathRule()],
@@ -152,6 +153,7 @@ class ProjectController extends Controller
             'type' => $project->type,
             'docroot_subpath' => $project->docroot_subpath,
             'keep_releases' => $project->keep_releases,
+            'auto_rollback' => $project->auto_rollback,
             'health_check_url' => $project->health_check_url,
             'shared_paths' => $project->shared_paths,
             'hooks' => $project->hooks,
@@ -289,6 +291,7 @@ class ProjectController extends Controller
             'type' => ['sometimes', 'required', Rule::enum(ProjectType::class)],
             'docroot_subpath' => ['sometimes', 'nullable', 'string', 'max:255'],
             'keep_releases' => ['sometimes', 'required', 'integer', 'min:1', 'max:50'],
+            'auto_rollback' => ['sometimes', 'boolean'],
             'health_check_url' => ['sometimes', 'nullable', 'url'],
             'shared_paths' => ['sometimes', 'array'],
             'shared_paths.*' => [$this->sharedPathRule()],
@@ -317,18 +320,15 @@ class ProjectController extends Controller
             }
         }
 
-        // Lowering keep_releases prunes immediately (below). Never let that delete the live
-        // release — if it is older than the new window, make the user activate a newer one first.
-        if (array_key_exists('keep_releases', $data)) {
-            $this->assertKeepReleasesAllowed($project, (int) $data['keep_releases']);
-        }
-
         $project->fill($data);
         $changed = array_keys($project->getDirty());
         $project->save();
 
         // Apply the new retention right away so the Releases list + disk match the setting, rather
-        // than waiting for the next deploy to prune.
+        // than waiting for the next deploy to prune. Lowering keep_releases below the live release's
+        // position no longer errors (docs/SPEC.md §21.4): pruneReleases never deletes the active
+        // release, so the list may briefly hold more than keep_releases and re-converges on the next
+        // deploy/activation.
         if (in_array('keep_releases', $changed, true)) {
             $releasePruner->prune($project, $project->keep_releases);
             RecomputeDiskUsageJob::dispatch($project);
@@ -340,32 +340,6 @@ class ProjectController extends Controller
         ]);
 
         return response()->json(['data' => $project->fresh()]);
-    }
-
-    /**
-     * Guard a keep_releases decrease: the currently-active ("live") release must stay within the
-     * newest-N window, or pruning would strand the running site. Re-activatable releases are
-     * ordered newest-first (creation order, which matches on-disk mtime); if the live one falls
-     * outside the new keep, reject with actionable guidance.
-     */
-    private function assertKeepReleasesAllowed(Project $project, int $newKeep): void
-    {
-        $releases = $project->releases()
-            ->whereIn('state', [ReleaseState::Active->value, ReleaseState::Superseded->value])
-            ->orderByDesc('id')
-            ->get();
-
-        $activeIndex = $releases->search(fn ($r) => $r->state === ReleaseState::Active);
-        if ($activeIndex === false) {
-            return; // no live release to protect yet
-        }
-
-        if ($activeIndex >= $newKeep) {
-            throw ValidationException::withMessages([
-                'keep_releases' => 'The live release is the #'.($activeIndex + 1)." newest, so keeping only {$newKeep} "
-                    ."would delete it. Activate one of the {$newKeep} newest releases first, then lower keep_releases.",
-            ]);
-        }
     }
 
     /**

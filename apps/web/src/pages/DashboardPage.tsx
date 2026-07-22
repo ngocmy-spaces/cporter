@@ -65,7 +65,9 @@ export function DashboardPage() {
   const stuck = inFlight.filter(
     (d) => now - new Date(d.started_at ?? d.created_at).getTime() > STUCK_THRESHOLD_MS,
   );
-  const hasAlerts = failedRecent.length > 0 || inFlight.length > 0;
+  // Continuously-monitored health: only `unhealthy` alerts (docs/SPEC.md §21.1).
+  const unhealthyProjects = allProjects.filter((p) => p.health_status === 'unhealthy');
+  const hasAlerts = failedRecent.length > 0 || inFlight.length > 0 || unhealthyProjects.length > 0;
 
   return (
     <Stack gap="lg">
@@ -141,6 +143,12 @@ export function DashboardPage() {
           </Group>
         ) : (
           <Stack gap="xs">
+            {unhealthyProjects.length > 0 && (
+              <Alert color="red" icon={<IconAlertTriangle size={16} />} variant="light" p="xs">
+                {unhealthyProjects.length} project{unhealthyProjects.length === 1 ? '' : 's'} failing
+                the health check: {unhealthyProjects.map((p) => p.name).join(', ')}.
+              </Alert>
+            )}
             {failedRecent.length > 0 && (
               <Alert color="red" icon={<IconAlertTriangle size={16} />} variant="light" p="xs">
                 {failedRecent.length} deployment{failedRecent.length === 1 ? '' : 's'} failed or rolled

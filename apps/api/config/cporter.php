@@ -59,7 +59,11 @@ return [
 
     // Health check defaults.
     'health_check' => [
+        // Deploy-time activation gate: poll (with retries) up to this many seconds for a 2xx.
         'timeout' => (int) env('CPORTER_HEALTHCHECK_TIMEOUT', 30),
+        // Continuous monitor (cporter:check-health): a single-shot poll per project (0 = no retry
+        // loop) so one sweep across every project stays fast.
+        'monitor_timeout' => (int) env('CPORTER_HEALTHCHECK_MONITOR_TIMEOUT', 0),
         'expect_status' => 200,
     ],
 

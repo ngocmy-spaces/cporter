@@ -92,12 +92,28 @@ and **spec reference**. Legend: ✅ done · 🔜 next · ⬜ todo · 🔒 blocke
 
 | ID | Task | Priority | Deliverable / Notes | Spec |
 |----|------|:----:|---|---|
-| **T5.1** | Rollback: run hooks + health-check | 🔴 High | Rollback currently does symlink-swap only. Add post-activate hooks (cache clear) + a health-check after swap; on unhealthy target, surface it (don't silently leave a bad release live). | §8, §20.3 |
+| **T5.1** | ~~Rollback: run hooks + health-check~~ | ✅ Resolved by design | **Superseded by Phase 6 (§21).** Decision 2026-07-22: manual rollback stays code-only (§21.3); post-rollback health moves to continuous monitoring (T6.1); auto-rollback becomes opt-in single-target-or-stay (T6.2). | §8, §21 |
 | **T5.2** | Concurrent deploy → `409` | 🟡 Med | Detect an existing deploy lock **at request time** and return `409 Conflict` synchronously, instead of failing the loser asynchronously. | §6, §20.2 |
 | **T5.3** | Strengthen pipeline "Validate" (step 9) | 🟡 Med | Verify `public/index.php` (Laravel) / `index.html` (static) exist, not just that the docroot is a directory. | §6, §20.2 |
 | **T5.4** | CI read-scope for projects/releases | 🟢 Low | Decide: expose `GET /projects` + `/projects/{slug}/releases` to read-scope API keys, or formally drop them from the CI contract (currently admin-session only). | §7, §20.1 |
 | **T5.5** | Deployment logs endpoint | 🟢 Low | Either implement `GET /deployments/{id}/logs` or keep logs in `steps[]` and remove the endpoint from the contract permanently (already removed from API.md). | §7, §20.1 |
 | **T5.6** | Publish `@cporter/mcp` | 🟢 Low | Decide whether to publish MCP to npm; if yes, add it to `publish.yml` (after SDK) + RELEASING.md "What ships". | §18, §20.6 |
+
+---
+
+## Phase 6 — Release control, health monitoring & rollback policy (v1.1)
+
+> Decided 2026-07-22 ([SPEC §21](docs/SPEC.md#21-v11--release-control-health-monitoring--rollback-policy-planned)).
+> Ordered by ascending risk — each slice ships independently. Legend: ⬜ todo.
+
+| ID | Task | Status | Deliverable / Notes | Spec |
+|----|------|:----:|---|---|
+| **T6.1** | Continuous project health | ✅ | Migration `projects.health_status`(`healthy\|unhealthy\|unknown\|paused`) + `health_checked_at` + `health_last_ok_at` + `ProjectHealth` enum. `ProjectHealthMonitor` = single writer; `cporter:check-health` command (scheduled every 5' + in `cporter:work` loop) polls non-deleting projects (single-shot, `monitor_timeout=0`). Deploy-time gate writes through `health_status`. Dashboard alert + Projects-list **Health** column + detail Overview read `project.health_status` directly. | §21.1 |
+| **T6.2** | Auto-rollback = opt-in policy | ✅ | Migration `projects.auto_rollback` (bool, default false) + create/edit **Switch**. `DeployEngine::handleActivationFailure`: gate on the flag; select a **single** previous release, verify `is_dir`; valid → `rolled_back` (project→`unknown`), none/off → stay on new release + `failed` + `unhealthy` (no loop/crash). Trigger narrowed to failed health check / post-activate hook only — `prune`/`disk_stats` demoted to non-fatal warnings. | §21.2 |
+| **T6.3** | `keep_releases` edit no longer blocks | ✅ | Removed `assertKeepReleasesAllowed` + its call + comment in `ProjectController::update`; kept `pruneReleases` (protects the active release). `KeepReleasesRetentionTest` block-test flipped → asserts the edit succeeds and the live release survives outside the new window. | §21.4 |
+| **T6.4** | Releases tab UX | ✅ | `active` → static **Live** badge (no self-targeting button); `superseded` → **Rollback** action + code-only confirm copy. Intro clarifies "code version applied" vs "available to roll back to". | §21.5 |
+
+**Milestone M6:** ✅ ACHIEVED — rollback is an explicit, opt-in policy; project health is a persisted, continuously-monitored signal read from one source; retention never blocks the operator.
 
 ---
 

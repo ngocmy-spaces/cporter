@@ -60,17 +60,25 @@ function makeLive(object $ctx, int $n): void
     }
 }
 
-it('blocks lowering keep_releases when it would delete the live release', function () {
+it('allows lowering keep_releases even when the live release falls outside the new window', function () {
+    // docs/SPEC.md §21.4: the edit is always allowed; pruning never deletes the active release, so
+    // the list may briefly hold more than keep_releases.
     makeLive($this, 3); // live is the #3 newest (index 2)
 
     $this->actingAs($this->admin)
         ->patchJson('/api/v1/projects/shop', ['keep_releases' => 2])
-        ->assertStatus(422)
-        ->assertJsonValidationErrorFor('keep_releases');
+        ->assertOk();
 
-    // Nothing was pruned — the setting is unchanged and all dirs remain.
-    expect($this->project->fresh()->keep_releases)->toBe(5)
-        ->and(File::isDirectory($this->base.'/releases/rel1'))->toBeTrue();
+    // The setting is applied, and the live release survives even though it's outside the newest-2
+    // window (rel4/rel5 are the newest two; rel3 is protected as the active release).
+    expect($this->project->fresh()->keep_releases)->toBe(2)
+        ->and(File::isDirectory($this->base.'/releases/rel3'))->toBeTrue()
+        ->and($this->releases[3]->fresh()->state)->toBe(ReleaseState::Active)
+        ->and(File::isDirectory($this->base.'/releases/rel5'))->toBeTrue()
+        ->and(File::isDirectory($this->base.'/releases/rel4'))->toBeTrue()
+        // Releases older than the window (and not live) are still pruned.
+        ->and(File::isDirectory($this->base.'/releases/rel1'))->toBeFalse()
+        ->and(File::isDirectory($this->base.'/releases/rel2'))->toBeFalse();
 });
 
 it('allows lowering keep_releases while the live release stays within the window', function () {

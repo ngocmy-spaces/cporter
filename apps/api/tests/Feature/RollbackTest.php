@@ -30,6 +30,7 @@ beforeEach(function () {
         'shared_paths' => [],
         'keep_releases' => 5,
         'health_check_url' => 'https://demo.test/up',
+        'auto_rollback' => true, // opt in — auto-rollback is opt-in policy (docs/SPEC.md §21.2)
     ]);
 
     ['token' => $this->token] = app(ApiKeyService::class)->generate('ci', ['deploy', 'read', 'rollback'], $this->project->id);
@@ -98,7 +99,7 @@ it('requires the rollback scope', function () {
         ->assertStatus(403);
 });
 
-it('auto-rolls back when the health check fails after activation', function () {
+it('auto-rolls back when the health check fails after activation (auto_rollback on)', function () {
     // First deploy healthy (200), second deploy unhealthy (500) → auto-rollback to first.
     Http::fakeSequence()->pushStatus(200)->pushStatus(500);
 
@@ -110,4 +111,33 @@ it('auto-rolls back when the health check fails after activation', function () {
     // current is back on the first release; the failed release is marked failed.
     expect(file_get_contents($this->base.'/current/index.html'))->toBe('A')
         ->and(collect($res->json('data.steps'))->pluck('name')->all())->toContain('health_check', 'auto_rollback');
+});
+
+it('stays on the new release and marks it failed when the health check fails with auto_rollback off', function () {
+    $this->project->forceFill(['auto_rollback' => false])->save();
+
+    // First deploy healthy (200), second deploy unhealthy (500) → NO swap, stay on the new release.
+    Http::fakeSequence()->pushStatus(200)->pushStatus(500);
+
+    ($this->deploy)('A')->assertJsonPath('data.status', 'success');
+
+    $res = ($this->deploy)('B');
+    $res->assertStatus(202)->assertJsonPath('data.status', 'failed');
+
+    // The new (unhealthy) release stays live — no auto_rollback step — and the project is unhealthy.
+    expect(file_get_contents($this->base.'/current/index.html'))->toBe('B')
+        ->and(collect($res->json('data.steps'))->pluck('name')->all())
+        ->toContain('health_check')
+        ->not->toContain('auto_rollback')
+        ->and($this->project->fresh()->health_status->value)->toBe('unhealthy');
+});
+
+it('marks the project healthy after a passing deploy health check', function () {
+    Http::fake(['*' => Http::response('', 200)]);
+
+    ($this->deploy)('A')->assertJsonPath('data.status', 'success');
+
+    $fresh = $this->project->fresh();
+    expect($fresh->health_status->value)->toBe('healthy')
+        ->and($fresh->health_last_ok_at)->not->toBeNull();
 });

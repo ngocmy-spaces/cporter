@@ -86,7 +86,7 @@ Logs are delivered **inside `steps[]`** — there is no separate `/logs` endpoin
 ### `POST /projects/{slug}/rollback`  — scope: `rollback`
 Roll the project back. Body: `{ "release_id": <int> }` (optional — omit to roll back to the previous release; the SDK/MCP option `releaseId` maps to this snake_case wire field).
 Returns `{ "data": <Deployment> }`.
-> Current behavior: **symlink swap only** (no post-activate hooks / no health-check re-run yet — tracked in the backlog, SPEC §20).
+> Behavior: **code-only symlink swap by design** — no hooks, no inline health re-check (an operator wants the previous code live immediately; post-rollback health is observed via continuous monitoring). SPEC §21.3.
 
 ### `POST /webhooks/{provider}`  — signature-verified, no token/session
 `{provider}` ∈ `github | gitlab`.
@@ -111,10 +111,10 @@ Used only by the SPA. **Not reachable with an API key** (session guard). Listed 
 | GET | `/system/storage` | read | artifact-store health from the last housekeep sweep: `{ state: healthy\|warning\|unknown, store_bytes, unpruned_count, reclaimed_count, freed_bytes, last_run_at, prune_enabled, warn_bytes, warnings[] }` (warning codes: `pruning_disabled`, `store_over_threshold`, `sweep_stale`) |
 | GET/POST/DELETE | `/api-keys` · `/api-keys/{id}` | read / admin | token CRUD (plaintext shown once) |
 | GET | `/projects` · `/projects/{slug}` | read | list / show projects. `?search=` + `?status=active\|disabled\|deleting` filter; `?page=`/`?per_page=` (≤100) switch to a paginated `{data, meta}` envelope, else the full list. **Show** also embeds `active_release` (`{id,version,activated_at}`) and `last_deployment` (`{id,status,created_at}`) summaries (or `null`) so the detail page can lazy-load the per-tab lists |
-| POST | `/projects` | admin | create a project (jail-validated `base_path`, which must not already be used by another project). Also scaffolds `releases/` + `shared/` and returns a `preflight` report alongside `data` (see below) |
+| POST | `/projects` | admin | create a project (jail-validated `base_path`, which must not already be used by another project). Optional `auto_rollback` (bool, default false — roll back on a failed post-activation health check). Also scaffolds `releases/` + `shared/` and returns a `preflight` report alongside `data` (see below) |
 | POST | `/projects/{slug}/preflight` | admin | (re-)run host preflight: idempotently ensure `releases/` + `shared/`, probe symlink support, inspect `current`, flag missing shared files + the manual Document-Root step → `{ data: <report> }` |
-| POST | `/projects/{slug}/clone` | admin | duplicate the project's config into a new project. Body: `name`, `base_path` (required, jail-validated + unique), `slug?`. Copies type/docroot/keep_releases/health_check_url/shared_paths/hooks/env_vars; **no** releases/deployments are copied; the clone starts `active`. Same `{ data, preflight }` + `201` as create |
-| PATCH | `/projects/{slug}` | admin | update project config; `status: disabled` blocks new deploys. `slug`/`base_path`/`type` are frozen once releases exist. `keep_releases` (≥1) is enforced immediately — lowering it prunes surplus releases at once, and is rejected `422` if it would delete the currently-live release (activate a newer one first) |
+| POST | `/projects/{slug}/clone` | admin | duplicate the project's config into a new project. Body: `name`, `base_path` (required, jail-validated + unique), `slug?`. Copies type/docroot/keep_releases/auto_rollback/health_check_url/shared_paths/hooks/env_vars; **no** releases/deployments are copied; the clone starts `active`. Same `{ data, preflight }` + `201` as create |
+| PATCH | `/projects/{slug}` | admin | update project config; `status: disabled` blocks new deploys. `slug`/`base_path`/`type` are frozen once releases exist. `keep_releases` (≥1) is applied immediately — lowering it prunes surplus releases at once but never deletes the currently-live release, so the list may briefly hold more than `keep_releases` (SPEC §21.4). `auto_rollback` (bool) toggles the failed-health-check rollback policy |
 | DELETE | `/projects/{slug}` | admin | soft-delete a project. Body `purge`: `none` (default — hide only, files kept, `200`) · `releases` (drop releases/ + `current`, keep shared/) · `all` (delete the whole base_path). A purge runs async: the project goes `deleting` (deploys blocked) and is hidden when done → `202` |
 | GET | `/projects/{slug}/env` | admin | read managed env vars (decrypted) + the `shared/.env` file state → `{ data: { vars, file } }`. **Admin-only** (secrets) — never in `show`/`index` |
 | PUT | `/projects/{slug}/env` | admin | replace the managed env vars. Body `env_vars: [{key,value}]` (keys `^[A-Za-z_][A-Za-z0-9_]*$`, unique, ≤255; value ≤32768). Stored encrypted; rendered to `shared/.env` on the next deploy → `{ data: { vars, file } }` |
@@ -182,7 +182,7 @@ ordered list of shell-command strings. Exactly two stages are recognised; any ot
 | Stage | When it runs | Failure |
 |---|---|---|
 | `pre_activate` | before the new release goes live | deploy fails; nothing is swapped |
-| `post_activate` | after activation | auto-rollback to the previous release |
+| `post_activate` | after activation | deploy `failed` + project `unhealthy`; rolled back only if `auto_rollback` is on (SPEC §21.2) |
 
 ```json
 "hooks": { "pre_activate": ["php artisan migrate --force"], "post_activate": ["php artisan queue:restart"] }

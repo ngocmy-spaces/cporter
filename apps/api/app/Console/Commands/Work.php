@@ -72,6 +72,8 @@ class Work extends Command
                     $this->tick('cporter:housekeep', []);
                     // Refresh hook-binary detection in the shell context (self-throttled to ~6h).
                     $this->tick('cporter:probe-binaries', []);
+                    // Refresh the persisted project-health signal (docs/SPEC.md §21.1).
+                    $this->tick('cporter:check-health', []);
                     $nextHousekeep = time() + $housekeepEvery;
                 }
 
