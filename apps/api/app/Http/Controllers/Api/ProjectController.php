@@ -522,8 +522,11 @@ class ProjectController extends Controller
      * `hooks` is an object keyed by deploy stage → ordered list of command strings
      * (docs/SPEC.md §9, §16). Only the stages the engine actually runs are allowed
      * ({@see Project::HOOK_STAGES}: pre_activate, post_activate); each command is a raw
-     * shell string run verbatim in the release dir (e.g. `php artisan migrate --force`,
-     * `/usr/bin/ea-php83 artisan migrate`, `composer install --no-dev`, `npm run build`).
+     * shell string run verbatim in the release dir. Use an ABSOLUTE PHP CLI path, not bare
+     * `php` — on cPanel bare `php` may resolve to php-cgi, which prints artisan's help list
+     * and exits 0 (the hook "succeeds" but never migrates). e.g.
+     * `/usr/local/bin/php artisan migrate --force`, `/opt/cpanel/ea-php83/root/usr/bin/php artisan migrate`,
+     * `composer install --no-dev`, `npm run build`.
      * The model normalizes (trims, drops blanks) before persisting — this rule guards shape.
      */
     private function hooksRule(): \Closure

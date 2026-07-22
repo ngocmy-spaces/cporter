@@ -14,7 +14,9 @@ Replace `USER` with your cPanel username and `cporter.domain` with your control-
    `cporter.domain/current/public` (Domains ▸ create/manage → Document Root). It'll 404 until
    the first release exists — that's fine.
 2. **PHP 8.3** for that domain — *MultiPHP Manager* → set `cporter.domain` to `ea-php83`.
-   Note the CLI path (usually `/opt/cpanel/ea-php83/root/usr/bin/php`).
+   Note the CLI path (usually `/opt/cpanel/ea-php83/root/usr/bin/php`, or `/usr/local/bin/php`).
+   Always use this **absolute CLI path** in cron lines and hooks — bare `php` may be php-cgi
+   (verify with `php -v` showing `(cli)`), which silently no-ops artisan commands.
 3. **MySQL** — *MySQL® Databases*: create a database (`USER_cporter`) + user, add the user to
    the DB with **ALL PRIVILEGES**.
 4. **A shell for the one-time bootstrap** — *Terminal* (cPanel jailed shell) or SSH. If you
@@ -172,10 +174,13 @@ For each site cPorter will deploy, set that domain's **Document Root**:
    - Laravel: `docroot_subpath=public`, `shared_paths=[".env","storage"]`,
      hooks `pre_activate=["php artisan migrate --force","php artisan config:cache"]`,
      `post_activate=["php artisan queue:restart"]`
-     (each hook is a full shell command — use the interpreter path you need, e.g.
-     `/opt/cpanel/ea-php83/root/usr/bin/php artisan migrate`; the **System** page lists detected binaries —
-     probed in the cron shell via `command -v` by `cporter:probe-binaries` (run automatically by the
-     scheduler/worker, no extra cron needed), so it reflects the exact PATH your hooks run with)
+     (each hook is a full shell command — use an **absolute PHP CLI path**, e.g.
+     `/usr/local/bin/php artisan migrate` or `/opt/cpanel/ea-php83/root/usr/bin/php artisan migrate`.
+     ⚠️ Do **not** use bare `php`: on cPanel it often resolves to php-cgi, which prints artisan's help
+     list and exits 0 — the hook shows as *succeeded* but the migration never ran. The **System** page lists
+     detected binaries — probed in the cron shell via `command -v` by `cporter:probe-binaries` (run automatically
+     by the scheduler/worker, no extra cron needed), so it reflects the exact PATH your hooks run with;
+     verify it points at a CLI build, e.g. `/usr/local/bin/php -v` should say `(cli)`, not `(cgi-fcgi)`)
    - `health_check_url=https://<site>.domain/up` (Laravel has `/up`; static: any 200 URL)
 2. **API Keys ▸ New key** (scope `deploy`, `read`, optionally `rollback`) → copy the token.
 3. Deploy from CI or Postman:

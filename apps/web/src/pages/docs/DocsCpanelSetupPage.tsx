@@ -111,7 +111,10 @@ export function DocsCpanelSetupPage() {
           <List.Item>
             <strong>PHP 8.3</strong> — MultiPHP Manager → set <code>cporter.domain</code> to{' '}
             <code>ea-php83</code>. Note the CLI path (usually{' '}
-            <code>/opt/cpanel/ea-php83/root/usr/bin/php</code>).
+            <code>/opt/cpanel/ea-php83/root/usr/bin/php</code>, or <code>/usr/local/bin/php</code>).
+            Always use an <strong>absolute CLI path</strong> in cron lines and project hooks — bare{' '}
+            <code>php</code> can resolve to php-cgi, which prints the artisan help list and exits 0
+            (commands silently do nothing).
           </List.Item>
           <List.Item>
             <strong>MySQL</strong> — create a database (<code>USER_cporter</code>) + user, and grant the

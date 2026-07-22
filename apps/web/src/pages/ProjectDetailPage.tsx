@@ -1114,8 +1114,11 @@ export function ProjectDetailPage() {
             <Stack gap="sm">
               <Text size="xs" c="dimmed">
                 Commands run verbatim on the cron worker, in the release directory — mainly for
-                Laravel/Node projects. Include the interpreter yourself, e.g.{' '}
-                <Code>php artisan migrate --force</Code>,{' '}
+                Laravel/Node projects. Include the interpreter yourself, and use an{' '}
+                <b>absolute PHP CLI path</b> — not bare <Code>php</Code>. On cPanel bare{' '}
+                <Code>php</Code> often resolves to php-cgi, which just prints the artisan help
+                list and exits 0, so migrations are silently skipped. Use e.g.{' '}
+                <Code>/usr/local/bin/php artisan migrate --force</Code> or{' '}
                 <Code>/opt/cpanel/ea-php83/root/usr/bin/php artisan migrate</Code>,{' '}
                 <Code>composer install --no-dev</Code>, or <Code>npm run build</Code>. Check the{' '}
                 <b>System</b> page to see which binaries the host detects.
@@ -1131,7 +1134,7 @@ export function ProjectDetailPage() {
                   {editForm.values.hooks[stage.key].map((_, index) => (
                     <Group key={index} gap="xs" align="flex-start">
                       <TextInput
-                        placeholder="php artisan migrate --force"
+                        placeholder="/usr/local/bin/php artisan migrate --force"
                         style={{ flex: 1 }}
                         {...editForm.getInputProps(`hooks.${stage.key}.${index}`)}
                       />

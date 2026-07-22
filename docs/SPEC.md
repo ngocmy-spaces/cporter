@@ -59,7 +59,7 @@ This section drives the design. cPanel shared hosting is very different from a V
 | Cron: cPanel allows creating cron jobs (UI or UAPI) | ✅ A single cron calls cPorter's scheduler endpoint (§10). |
 | The document root of an addon domain is a **fixed path** once the domain is created | ✅ Point the docroot to `.../current/public` (Laravel) or `.../current` (static); cPanel's Apache defaults to `SymLinksIfOwnerMatch` → same-owner symlinks work. |
 | No always-on Redis/systemd/queue worker | ✅ Queue uses the **`database` driver**; the worker runs via cron `queue:work --stop-when-empty`, or synchronous processing for the MVP. |
-| The target app's PHP CLI binary may differ from PHP-FPM (multiple EA-PHP versions) | ✅ Configure the **PHP binary path per-project** (e.g. `/opt/cpanel/ea-php82/root/usr/bin/php`). |
+| The target app's PHP CLI binary may differ from PHP-FPM (multiple EA-PHP versions) | ✅ Hooks run verbatim, so the operator specifies the **absolute PHP CLI path** inline (e.g. `/usr/local/bin/php artisan …` or `/opt/cpanel/ea-php82/root/usr/bin/php artisan …`). Bare `php` may resolve to php-cgi, which silently no-ops artisan commands (prints help, exits 0). |
 
 > **[CONFIRMED]** All managed projects reside in the **same cPanel account** as cPorter
 > (the same `/home/<user>/`). This is single-tenant (finalized in §17.6).
@@ -378,7 +378,11 @@ cPorter runs a probe and stores it in Settings, displaying it in the Admin panel
 **Hook-binary detection.** The web probe can only PATH-scan for hook CLIs (php/composer/node/npm/python3) since web PHP has no
 `proc_open`. The authoritative result comes from `cporter:probe-binaries`, run by the scheduler/worker in the cron shell: it uses
 `command -v` — the exact PATH hooks run with — and caches `{name → path}` in Settings (self-throttled ~6h). `/system/capabilities`
-overlays it (`binaries_source` = `cron` when present, else `path-scan` fallback).
+overlays it (`binaries_source` = `cron` when present, else `path-scan` fallback). **Caveat:** `command -v php` returns whatever
+`php` resolves to on the cron PATH, which on cPanel is frequently the **php-cgi (CGI SAPI)** binary — under CGI SAPI artisan
+receives no `$argv`, prints its help list, and exits 0, so a `migrate` hook is recorded as *successful* while nothing migrates.
+Operators must therefore use an **absolute CLI path** in hooks (e.g. `/usr/local/bin/php`, verifiable via `php -v` → `(cli)`), not
+bare `php`. cPorter does not yet SAPI-check or rewrite the interpreter (roadmap §20).
 
 > **Roadmap consequence:** because static/WP/PHP can be deployed **entirely without a shell**, the MVP (Phase 1) does this group
 > first; Laravel + cron-worker come in Phase 2 (§18).
@@ -534,9 +538,10 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
     { "path": "storage", "type": "dir" }   // "dir"  → auto-created if missing
   ],                                        // bare strings (e.g. ".env") still accepted → normalized to type "dir"
   "health_check_url": "https://learn.domain/up",
-  "hooks": {                               // each entry is a full shell command, run verbatim on the cron worker
-    "pre_activate":  ["php artisan migrate --force", "php artisan config:cache"],
-    "post_activate": ["php artisan queue:restart"]
+  "hooks": {                               // each entry is a full shell command, run verbatim on the cron worker.
+    // Use an ABSOLUTE PHP CLI path, not bare `php` — bare `php` may be php-cgi and silently no-op (see §2.1 table).
+    "pre_activate":  ["/usr/local/bin/php artisan migrate --force", "/usr/local/bin/php artisan config:cache"],
+    "post_activate": ["/usr/local/bin/php artisan queue:restart"]
   }
 }
 ```

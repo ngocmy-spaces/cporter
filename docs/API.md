@@ -189,7 +189,10 @@ ordered list of shell-command strings. Exactly two stages are recognised; any ot
 ```
 
 Each command runs **verbatim** as a raw shell command in the release directory (cwd), 600s timeout, on the
-cron worker (§SPEC 9). Include the interpreter yourself — e.g. `php artisan …`,
+cron worker (§SPEC 9). Include the interpreter yourself, and for PHP use an **absolute CLI path** — **not**
+bare `php`. On cPanel bare `php` frequently resolves to the **php-cgi** (CGI SAPI) binary, which does not
+populate `$argv`: artisan then prints its help list and **exits 0**, so the hook is recorded as *successful*
+while the migration silently never runs. Use e.g. `/usr/local/bin/php artisan migrate --force` or
 `/opt/cpanel/ea-php83/root/usr/bin/php artisan …`, `composer install --no-dev`, or `npm run build`. The
 `/system/capabilities` endpoint reports which binaries the host detects — `binaries` (name → path/null) plus
 `binaries_source` (`cron` once the worker has run `command -v` in the shell hooks use, else `path-scan` fallback)
