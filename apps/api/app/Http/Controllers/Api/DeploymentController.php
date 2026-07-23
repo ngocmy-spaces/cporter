@@ -5,13 +5,13 @@ namespace App\Http\Controllers\Api;
 use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Audit\AuditLogger;
 use App\Domain\Deploy\ArtifactUploadService;
+use App\Domain\Deploy\DeployDispatcher;
 use App\Enums\ArtifactStatus;
 use App\Enums\DeploymentStatus;
 use App\Enums\DeploymentTrigger;
 use App\Enums\ProjectStatus;
 use App\Enums\ReleaseState;
 use App\Http\Controllers\Controller;
-use App\Jobs\DeployProjectJob;
 use App\Models\Artifact;
 use App\Models\Deployment;
 use App\Models\Project;
@@ -162,7 +162,10 @@ class DeploymentController extends Controller
             'idempotency_key' => $request->header('Idempotency-Key'),
         ]);
 
-        DeployProjectJob::dispatch($deployment);
+        // Kick the per-project FIFO dispatcher: it starts this deploy immediately if the project is
+        // idle, otherwise the row stays `queued` as backlog and is drained when the project frees
+        // (docs/SPEC.md §6, §10). Under the sync queue driver (tests) the claimed deploy runs inline.
+        app(DeployDispatcher::class)->claimNextFor($project);
 
         app(AuditLogger::class)->record(
             'deployment.created',

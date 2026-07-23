@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Domain\Deploy\DeployDispatcher;
 use App\Domain\Deploy\DeployEngine;
 use App\Domain\System\CronHeartbeat;
 use App\Enums\DeploymentStatus;
@@ -23,7 +24,7 @@ class RunJobs extends Command
 
     protected $description = 'Finalize hooks_pending deployments: run Laravel hooks, activate, health-check';
 
-    public function handle(DeployEngine $engine, CronHeartbeat $heartbeat): int
+    public function handle(DeployEngine $engine, CronHeartbeat $heartbeat, DeployDispatcher $dispatcher): int
     {
         // Record the Mode-A cron heartbeat unless we're a nested pass inside cporter:work
         // (which records its own Mode-B heartbeat instead).
@@ -43,7 +44,11 @@ class RunJobs extends Command
             $this->line("  → {$result->status->value}");
         }
 
-        $this->info("cporter:run-jobs — processed {$pending->count()} deployment(s).");
+        // Drain the per-project FIFO deploy backlog: any project freed by a finalize above (or by a
+        // finished no-hook deploy) now starts its next queued deploy (docs/SPEC.md §6, §10).
+        $started = $dispatcher->dispatchPending();
+
+        $this->info("cporter:run-jobs — processed {$pending->count()} deployment(s); started {$started} queued deploy(s).");
 
         return self::SUCCESS;
     }

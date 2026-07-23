@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Deploy\ArtifactPruner;
+use App\Domain\Deploy\DeployDispatcher;
 use App\Domain\Deploy\ReleasePruner;
 use App\Domain\System\ArtifactStorageHeartbeat;
 use App\Enums\DeploymentStatus;
@@ -25,7 +26,7 @@ class Housekeep extends Command
 
     protected $description = 'Fail timed-out deployments, release stale locks, and reclaim artifact archives';
 
-    public function handle(StorageAdapter $storage, ArtifactPruner $artifacts, ReleasePruner $releases, ArtifactStorageHeartbeat $heartbeat): int
+    public function handle(StorageAdapter $storage, ArtifactPruner $artifacts, ReleasePruner $releases, ArtifactStorageHeartbeat $heartbeat, DeployDispatcher $dispatcher): int
     {
         $cutoff = now()->subSeconds((int) config('cporter.deployment_timeout', 1800));
 
@@ -47,6 +48,11 @@ class Housekeep extends Command
                 }
             }
         }
+
+        // Self-heal the FIFO backlog: a project freed by the reaper above (stale lock released)
+        // now starts its next queued deploy, so a crashed worker never strands a backlog forever
+        // (docs/SPEC.md §6, §10).
+        $dispatcher->dispatchPending();
 
         // Reclaim redundant artifact zips across every project (including soft-deleted ones, whose
         // backlog would otherwise never be cleaned). ArtifactPruner protects the live release and

@@ -267,8 +267,10 @@ auto-rollback if already activated, and always `finally { unlock }`.
 
 > **As-built:** the authoritative, current contract is **[docs/API.md](API.md)** — including the two auth
 > surfaces (API key vs admin session), the real **project-nested** chunked-upload paths, and known gaps
-> (`/deployments/{id}/logs` not implemented — logs live in `steps[]`; `GET /projects` + `/releases` are
-> admin-session only; no `Location` header; `meta` not emitted). The table below is the original design
+> (logs live in the deployment `steps[]` — there is no separate `/logs` endpoint, dropped from the contract
+> by decision; `GET /projects` is admin-session only while `GET /projects/{slug}/releases` is dual-auth
+> (admin session or a read-scope API key, T5.4); no `Location` header; `meta` not emitted).
+> The table below is the original design
 > sketch; where it disagrees with API.md, API.md wins. See §20.
 
 Base: `https://cporter.domain/api/v1` · Auth: `Authorization: Bearer <token>`
@@ -279,8 +281,7 @@ Base: `https://cporter.domain/api/v1` · Auth: `Authorization: Bearer <token>`
 | POST | `/projects/{slug}/artifacts` | Initialize an upload (chunked) |
 | PUT | `/artifacts/{uploadId}/chunks/{n}` | Upload a chunk |
 | POST | `/artifacts/{uploadId}/complete` | Finalize + verify |
-| GET | `/projects/{slug}/deployments/{id}` | Status + steps (poll) |
-| GET | `/projects/{slug}/deployments/{id}/logs` | Stream/tail the log |
+| GET | `/projects/{slug}/deployments/{id}` | Status + steps (poll) — the step timeline **is** the log |
 | POST | `/projects/{slug}/rollback` | Roll back to the previous release / a specified release |
 | GET | `/projects/{slug}/releases` | List releases |
 | GET | `/projects` | List projects (read scope) |
@@ -630,15 +631,15 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 | D | Envelope | Success `{data}`, error `{error}`. `meta` is emitted **only** by paginated `GET /projects` (`{data, meta:{current_page,last_page,per_page,total}}`); elsewhere it is absent. |
 | D | Project management endpoints | Beyond create/read, the admin surface ships `PATCH /projects/{slug}` (partial update; `status` toggles enable/disable; `slug`/`base_path`/`type` frozen once releases exist), `DELETE /projects/{slug}` (soft-delete + optional async disk purge `none`\|`releases`\|`all`), and `POST /projects/{slug}/clone` (duplicate config into a new project — no releases copied). `GET /projects` supports `?search`, `?status`, and opt-in `?page`/`?per_page`. `base_path` is now unique across live projects (enforced on create + clone). Full contract in API.md. |
 | D | Env-var management endpoints | Admin-only `GET`/`PUT /projects/{slug}/env` (read/replace managed env vars; values stored encrypted, never in `show`/`index`) and `POST /projects/{slug}/env/adopt` (force-write `shared/.env` to take over a hand-created file). `GET`/`PUT` return `{vars, file:{exists,managed}}`. Rendered into `shared/.env` on deploy (§6 step 7b, §9). Full contract in API.md. |
-| B | `GET /projects` & `GET /projects/{slug}/releases` | Listed in §7 as CI read-scope, but implemented **admin-session-only** → CI read-scope tokens can't call them. Decide: expose to read-scope keys, or drop from the CI contract. |
-| B | `GET /projects/{slug}/deployments/{id}/logs` | In §7, **not implemented**. Logs are returned inside the deployment `steps[]`; either build the endpoint or remove it from the contract (currently removed from API.md). |
+| ✅ | `GET /projects/{slug}/releases` | **Resolved (T5.4): dual-auth** via `read.session_or_apikey` middleware — reachable by a read-scope API key (project-scoped keys limited to their own project) or the admin session. `GET /projects` (list) stays **admin-session-only** by decision (project inventory is not part of the CI contract). |
+| ✅ | `GET /projects/{slug}/deployments/{id}/logs` | **Resolved (T5.5): dropped from the contract by decision.** Logs live in the deployment `steps[]` (returned by `GET …/deployments/{id}`); the `/logs` row is removed from §7 and API.md. |
 | B | `202` has no `Location` header | §7/§6 promise `Location`; not set. Poll via the id in the body. |
 
 ### 20.2 Deploy pipeline & concurrency (§6)
 | Kind | Item | Reality |
 |---|---|---|
-| B | Lock ordering / no `409` | Upload + sha256 verify happen in the web request **before** the deploy lock (lock is acquired inside the async job). Concurrent deploys → the loser **fails asynchronously**, not a synchronous `409 Conflict`. |
-| B | Step 9 "Validate" is weak | Only checks the docroot subpath is a directory; does **not** verify `public/index.php` / `index.html` exist as §6 step 9 states. |
+| ✅ | Concurrency model | **Per-project FIFO backlog** (§22), superseding the old "loser fails asynchronously" and the interim `409`-reject. A deploy requested while one is active for the same project is accepted and **queued**; `DeployDispatcher` starts the oldest queued deploy (atomic per-project claim) when the project is free. Different projects run independently — cooperatively on the single cPanel worker, in true parallel under N `queue:work` daemons. Manual rollback/activate keep a `409` only against an **actively running** deploy (not a queued backlog). |
+| ✅ | Step 9 "Validate" | **Resolved (T5.3):** `validateStructure` verifies the type's entrypoint exists in the docroot (Laravel/PHP/WordPress → `index.php`; static → `index.html`/`.htm`; Node exempt), not just that the docroot is a directory. |
 | D | Steps 5–6 placement | Hash verify + release-dir creation happen in the controller / folded into extract, not as discrete recorded `steps[]` entries. Functionally equivalent. |
 
 ### 20.3 Rollback engine (§8)
@@ -667,7 +668,7 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 ### 20.6 Ecosystem / release (§18)
 | Kind | Item | Reality |
 |---|---|---|
-| B | `@cporter/mcp` not published | Shipped as a package with a README + a `/docs` page, but **not in `publish.yml`** (which releases sdk + cli only). Decide whether to publish it to npm; if yes, add it to the publish matrix + RELEASING.md "What ships". |
+| ✅ | `@cporter/mcp` not published | **Resolved (T5.6): repo-only by decision.** Shipped as a package with a README + a `/docs` page, run from a local build/source rather than npm. `publish.yml` intentionally ships sdk + cli only; RELEASING.md records the decision + how to revisit it. |
 
 ### 20.7 Reality exceeds the spec (no action — worth noting)
 - Uncompressed-size **zip-bomb guard** on extract (beyond §6's inode/size cap).
@@ -727,3 +728,40 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 - Driven by the on-disk releases (`active` + `superseded`, post-reconcile) — *"what code is deployable right now"*.
 - The `active` release shows a static **Live** badge (no self-targeting Activate button); each `superseded` release shows a
   **Rollback** action. Goal: at a glance the operator sees which code version is applied and which versions are available to switch to.
+
+---
+
+## 22. Deploy concurrency — per-project FIFO backlog + multi-worker (planned)
+
+> Decided 2026-07-23. Replaces the interim `409`-reject on concurrent deploys (old §20.2). A project
+> runs at most one deploy at a time, extra deploys queue in order; different projects are independent.
+
+### 22.1 Model
+- A deploy request only persists a `Deployment{queued}` — the queued rows **are** the per-project backlog. No `409`.
+- `App\Domain\Deploy\DeployDispatcher`:
+  - `claimNextFor(Project)` — inside a short per-project cache lock `cporter:claim:{id}` (DB-backed, same primitive
+    as `cporter:work`): if the project has no **active** deploy (`running`/`hooks_pending`), atomically claim its
+    **oldest** `queued` (`orderBy id` → FIFO) via a conditional `UPDATE … WHERE status='queued'` (affected-rows CAS),
+    then dispatch `DeployProjectJob`. The per-project file lock `deploy.lock` remains the in-pipeline mutex.
+  - `dispatchPending()` — start the next queued deploy for every idle project. Runs at the tail of `cporter:run-jobs`
+    and `cporter:housekeep`, so a project freed by a finalize or a stale-lock reap drains its backlog the same pass.
+- The deploy request "kicks" `claimNextFor` so an **idle** project starts immediately (and, under the `sync` test
+  driver, runs inline — preserving existing test behaviour); a **busy** project leaves the row queued.
+
+### 22.2 Parallelism
+- Execution parallelism comes from the Laravel queue: **one** `queue:work` on the cPanel target (deploys of different
+  projects interleave cooperatively — the single worker still processes them one at a time, but multiple projects are
+  concurrently in-flight across the request→cron boundary); **N** dedicated `queue:work` daemons on Docker/VPS give true
+  cross-project parallelism. The per-project claim lock + `deploy.lock` make N workers safe.
+- **`retry_after` (queue) must exceed `DeployProjectJob::$timeout` (600s)** — raised to 660s — so the database queue can't
+  re-reserve a long-running deploy job and double-run it under multiple workers.
+
+### 22.3 Recovery
+- The `queued` backlog is self-healing: `cporter:housekeep` reaps stuck `running`/`hooks_pending` deploys (releasing
+  their `deploy.lock`) and then calls `dispatchPending()`, so a crashed worker never strands a project's backlog. A
+  permanently un-claimable queued row (e.g. a broken artifact) is cleared naturally the moment it is claimed and its
+  `deploy()` fails terminally. No timer-based `queued` reaper (it would kill legitimately-waiting backlog).
+
+### 22.4 Rollback interaction
+- Manual rollback/activate keep a `409` guard, now narrowed to an **actively running** deploy (`running`/`hooks_pending`)
+  — a purely-`queued` backlog does not block an operator's rollback (§8, §20.2).

@@ -84,9 +84,10 @@ it('reclaims redundant artifact zips project-wide, sparing live and in-flight on
     Release::create(['project_id' => $this->project->id, 'artifact_id' => $liveArt->id, 'path' => $this->base.'/releases/live', 'state' => ReleaseState::Active]);
     // Superseded release (its zip is dead weight → reclaimed).
     Release::create(['project_id' => $this->project->id, 'artifact_id' => $oldArt->id, 'path' => $this->base.'/releases/old', 'state' => ReleaseState::Superseded]);
-    // In-flight deploy still needs its zip (protected).
-    $inflightRelease = Release::create(['project_id' => $this->project->id, 'artifact_id' => $inflightArt->id, 'path' => $this->base.'/releases/inflight', 'state' => ReleaseState::Pending]);
-    Deployment::create(['project_id' => $this->project->id, 'release_id' => $inflightRelease->id, 'status' => DeploymentStatus::Queued, 'started_at' => now()]);
+    // In-flight deploy still needs its zip (protected). Use `running` (actively mid-pipeline), not
+    // `queued` — a queued row is now FIFO backlog that housekeep's dispatchPending would start.
+    $inflightRelease = Release::create(['project_id' => $this->project->id, 'artifact_id' => $inflightArt->id, 'path' => $this->base.'/releases/inflight', 'state' => ReleaseState::Extracting]);
+    Deployment::create(['project_id' => $this->project->id, 'release_id' => $inflightRelease->id, 'status' => DeploymentStatus::Running, 'started_at' => now()]);
 
     Artisan::call('cporter:housekeep');
 

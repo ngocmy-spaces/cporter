@@ -9,7 +9,7 @@ is the operational runbook — keep it in sync when the process changes.
 | --- | --- | --- |
 | `@cporter/sdk` | npm (public, scope `@cporter`) | dependency of the CLI + MCP |
 | `@cporter/cli` | npm (public) | `npx @cporter/cli deploy …` in any CI/shell |
-| `@cporter/mcp` | ⚠️ **built, not yet published** — see below | `npx -y @cporter/mcp` as an MCP server |
+| `@cporter/mcp` | **repo-only by decision (T5.6)** — not on npm | built locally / run from source as an MCP server |
 | **Deploy Action** | this monorepo, `packages/github-action/` | `uses: ngocmy-spaces/cporter/packages/github-action@v1` |
 
 The GitHub Action is a **thin composite wrapper** — it runs `npx @cporter/cli deploy`. It
@@ -63,13 +63,15 @@ the SDK version changes, re-publish the CLI too** so it points at the new SDK.
 **Dry run first (recommended):** run the workflow manually with `dry_run: true` — it builds and
 `pnpm pack`s both packages without publishing, so you can inspect the tarball contents.
 
-### `@cporter/mcp` — publishing (not yet wired)
+### `@cporter/mcp` — intentionally repo-only (T5.6 decision)
 
-`publish.yml` currently ships **only** `@cporter/sdk` and `@cporter/cli`. `@cporter/mcp` is built by
-`pnpm build:packages` and documented ([packages/mcp/README.md](../packages/mcp/README.md)), but it is
-**not in the publish matrix**, so `npx -y @cporter/mcp` does not resolve from npm yet.
+**Decision (2026-07-22): `@cporter/mcp` is not published to npm.** `publish.yml` ships **only**
+`@cporter/sdk` and `@cporter/cli`. The MCP server is built by `pnpm build:packages` and documented
+([packages/mcp/README.md](../packages/mcp/README.md)); consumers run it from a local build/source
+rather than `npx`. This keeps the published surface to the two packages external users actually
+install, and avoids the SDK-version-pinning re-publish treadmill (below) for a third package.
 
-To publish it (decision + one-time change — tracked in TASKS.md Phase 5):
+If that decision is ever revisited, publishing it is a one-time change:
 1. Ensure `packages/mcp/package.json` has `publishConfig.access = public` and a correct `@cporter/sdk`
    dependency (`workspace:*`, rewritten to a pinned version on publish — same rule as the CLI).
 2. Add an `@cporter/mcp` step to `publish.yml` **after** the SDK step (it depends on the SDK, like the CLI).

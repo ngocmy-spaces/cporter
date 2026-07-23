@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\DeploymentStatus;
 use App\Enums\ProjectHealth;
 use App\Enums\ProjectStatus;
 use App\Enums\ProjectType;
@@ -294,5 +295,40 @@ class Project extends Model
     public function apiKeys(): HasMany
     {
         return $this->hasMany(ApiKey::class);
+    }
+
+    /**
+     * The current in-flight (non-terminal) deployment for this project, if any — includes `queued`
+     * backlog. Kept for callers that must treat a queued-but-not-started deploy as occupying the
+     * project (docs/SPEC.md §6, §20.2).
+     */
+    public function inFlightDeployment(): ?Deployment
+    {
+        return $this->deployments()
+            ->whereIn('status', [
+                DeploymentStatus::Queued->value,
+                DeploymentStatus::Running->value,
+                DeploymentStatus::HooksPending->value,
+            ])
+            ->latest('id')
+            ->first();
+    }
+
+    /**
+     * The deployment that is ACTIVELY holding (or about to hold) the project's `deploy.lock` —
+     * `running` or `hooks_pending`, i.e. it excludes the `queued` backlog. This is the precheck for
+     * the FIFO claim: the next queued deploy may start only when nothing is active (§6, §10). Also
+     * the guard for manual rollback/activate — a purely-queued backlog does not block an operator's
+     * rollback, only a deploy that is actually mid-pipeline.
+     */
+    public function activeDeployment(): ?Deployment
+    {
+        return $this->deployments()
+            ->whereIn('status', [
+                DeploymentStatus::Running->value,
+                DeploymentStatus::HooksPending->value,
+            ])
+            ->latest('id')
+            ->first();
     }
 }

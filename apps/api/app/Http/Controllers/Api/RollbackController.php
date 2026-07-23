@@ -26,6 +26,9 @@ class RollbackController extends Controller
         if ($apiKey?->project_id !== null && $apiKey->project_id !== $project->id) {
             return response()->json(['error' => 'API key is not authorized for this project.'], 403);
         }
+        if ($conflict = $this->guardNoConcurrentDeploy($project)) {
+            return $conflict;
+        }
 
         $data = $request->validate([
             'release_id' => ['nullable', 'integer'],

@@ -154,6 +154,23 @@ cron limit. Tunables: `--duration` (loop length, keep `< 300` for a `*/5` cron),
 (gap between passes), `--max` (deploys per pass). An atomic cache lock prevents overlapping
 workers.
 
+### Parallel deploys across projects (Docker/VPS only — optional)
+
+The single cron above is **single-worker**: deploys of different projects are serialized (they
+still queue correctly per project — see SPEC §22 — they just don't run at the same wall-clock
+instant). This is the right model for cPanel (no long-running daemons). On a host that *does*
+allow long-lived processes (Docker/VPS), run **N dedicated** `php artisan queue:work` daemons
+alongside the scheduler to deploy multiple projects **truly in parallel**:
+
+```
+php artisan queue:work --queue=default --sleep=1 --tries=1 --timeout=600   # run several
+```
+
+This is safe: each project has its own claim lock + `deploy.lock`, and `retry_after` (660s) is
+kept above the job timeout so a job is never re-reserved mid-run. Same-project deploys stay FIFO;
+Laravel-hook finalize still funnels through the cron shell (`cporter:run-jobs`). The cPanel target
+is unchanged — leave it single-worker.
+
 ---
 
 ## 5. Point your other domains at their `current/`

@@ -29,7 +29,11 @@ Artisan::command('inspire', function () {
 // Finalize Laravel deploys (run hooks → activate → health) — the cron shell context.
 Schedule::command('cporter:run-jobs')->everyMinute()->withoutOverlapping();
 
-// Process staging jobs (artifact extract etc.) enqueued by the Deploy API.
+// Process deploy jobs (staging/extract, and the full no-hook pipeline) enqueued by the FIFO
+// dispatcher. This single scheduled worker keeps the cPanel target single-process (deploys of
+// different projects interleave cooperatively). For TRUE cross-project parallelism on Docker/VPS,
+// run N dedicated long-lived `php artisan queue:work` daemons instead of / alongside this — the
+// per-project claim lock + deploy.lock make that safe (docs/SPEC.md §6, §10).
 Schedule::command('queue:work --stop-when-empty --max-time=50')->everyMinute()->withoutOverlapping();
 
 // Fail timed-out deployments and release stale locks.

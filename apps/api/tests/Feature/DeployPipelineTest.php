@@ -4,6 +4,7 @@ use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Auth\ApiKeyService;
 use App\Domain\Storage\PathJail;
 use App\Enums\ProjectType;
+use App\Models\Deployment;
 use App\Models\Project;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -80,6 +81,46 @@ it('rejects a deploy to a project being deleted', function () {
     ])->assertStatus(409);
 });
 
+it('queues a concurrent deploy as FIFO backlog instead of rejecting it', function () {
+    // A deploy is already actively running for this project (holds the lock).
+    $inflight = Deployment::create([
+        'project_id' => $this->project->id,
+        'trigger' => 'api',
+        'status' => 'running',
+        'started_at' => now(),
+    ]);
+
+    $zip = buildZip(['index.html' => '<h1>cPorter</h1>']);
+    $res = $this->withToken($this->token)->post('/api/v1/projects/demo/deployments', [
+        'artifact' => upload($zip),
+        'sha256' => hash_file('sha256', $zip),
+    ]);
+
+    // Accepted + parked as queued backlog — not 409, not run.
+    $res->assertStatus(202)->assertJsonPath('data.status', 'queued');
+    expect(is_link($this->base.'/current'))->toBeFalse()
+        ->and($inflight->fresh()->status->value)->toBe('running'); // pre-existing run untouched
+});
+
+it('fails validation when the docroot is missing its entrypoint', function () {
+    // A static artifact with no index.html — the docroot exists but has no entrypoint.
+    $zip = buildZip(['readme.txt' => 'no entrypoint here']);
+
+    $res = $this->withToken($this->token)->post('/api/v1/projects/demo/deployments', [
+        'artifact' => upload($zip),
+        'sha256' => hash_file('sha256', $zip),
+    ]);
+
+    $res->assertStatus(202)->assertJsonPath('data.status', 'failed');
+
+    $validate = collect($res->json('data.steps'))->firstWhere('name', 'validate');
+    expect($validate['status'])->toBe('failed')
+        ->and($validate['error'])->toContain('entrypoint');
+
+    // Nothing went live.
+    expect(is_link($this->base.'/current'))->toBeFalse();
+});
+
 it('deploys a static artifact end to end', function () {
     $zip = buildZip(['index.html' => '<h1>cPorter</h1>']);
 
@@ -115,6 +156,33 @@ it('requires the deploy scope', function () {
         'artifact' => upload($zip),
         'sha256' => hash_file('sha256', $zip),
     ])->assertStatus(403);
+});
+
+it('lets a read-scope API key list releases (T5.4)', function () {
+    $zip = buildZip(['index.html' => 'hi']);
+    $this->withToken($this->token)->post('/api/v1/projects/demo/deployments', [
+        'artifact' => upload($zip),
+        'sha256' => hash_file('sha256', $zip),
+    ])->assertStatus(202);
+
+    $this->withToken($this->token)->getJson('/api/v1/projects/demo/releases')
+        ->assertOk()
+        ->assertJsonCount(1, 'data');
+});
+
+it('forbids listing releases with an API key that lacks the read scope', function () {
+    ['token' => $deployOnly] = app(ApiKeyService::class)->generate('deploy-only', ['deploy'], $this->project->id);
+
+    $this->withToken($deployOnly)->getJson('/api/v1/projects/demo/releases')
+        ->assertStatus(403);
+});
+
+it('forbids a project-scoped key from listing another project\'s releases', function () {
+    Project::factory()->create(['slug' => 'other', 'base_path' => $this->base.'-other']);
+
+    // $this->token is bound to the 'demo' project.
+    $this->withToken($this->token)->getJson('/api/v1/projects/other/releases')
+        ->assertStatus(403);
 });
 
 it('polls deployment status via GET', function () {

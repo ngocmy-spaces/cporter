@@ -4,6 +4,7 @@ use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Auth\ApiKeyService;
 use App\Domain\Storage\PathJail;
 use App\Enums\ProjectType;
+use App\Models\Deployment;
 use App\Models\Project;
 use App\Models\Release;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -49,6 +50,38 @@ beforeEach(function () {
 afterEach(function () {
     File::deleteDirectory($this->base);
     File::deleteDirectory(storage_path('app/artifacts/demo'));
+});
+
+it('returns 409 on rollback while a deploy is actively running (shared deploy lock)', function () {
+    Http::fake(['*' => Http::response('', 200)]);
+    ($this->deploy)('A')->assertStatus(202)->assertJsonPath('data.status', 'success');
+
+    // A concurrent deploy is mid-pipeline — rollback shares the same lock and must fail fast.
+    Deployment::create([
+        'project_id' => $this->project->id,
+        'trigger' => 'api',
+        'status' => 'running',
+        'started_at' => now(),
+    ]);
+
+    $this->withToken($this->token)
+        ->post('/api/v1/projects/demo/rollback')
+        ->assertStatus(409)->assertJsonPath('status', 'running');
+});
+
+it('allows a rollback when only a queued backlog exists (no active deploy)', function () {
+    Http::fake(['*' => Http::response('', 200)]);
+    ($this->deploy)('A')->assertStatus(202)->assertJsonPath('data.status', 'success');
+    ($this->deploy)('B')->assertStatus(202)->assertJsonPath('data.status', 'success');
+    expect(file_get_contents($this->base.'/current/index.html'))->toBe('B');
+
+    // A purely-queued backlog deploy — nothing running, so it must NOT block an operator rollback.
+    Deployment::create(['project_id' => $this->project->id, 'trigger' => 'api', 'status' => 'queued']);
+
+    $this->withToken($this->token)->postJson('/api/v1/projects/demo/rollback')
+        ->assertOk()->assertJsonPath('data.status', 'success');
+
+    expect(file_get_contents($this->base.'/current/index.html'))->toBe('A');
 });
 
 it('rolls back to the previous release', function () {

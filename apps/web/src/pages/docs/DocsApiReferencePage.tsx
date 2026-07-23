@@ -49,6 +49,11 @@ const ENDPOINTS: EndpointRow[] = [
     purpose: 'Poll deployment status.',
   },
   {
+    method: 'GET',
+    path: '/projects/{slug}/releases',
+    purpose: 'List re-activatable releases (read scope).',
+  },
+  {
     method: 'POST',
     path: '/projects/{slug}/rollback',
     purpose: 'Roll back to a previous release.',
@@ -195,7 +200,8 @@ export function DocsApiReferencePage() {
         <Timeline active={2} bulletSize={22} lineWidth={2}>
           <Timeline.Item title="queued">
             <Text size="sm" c="dimmed">
-              Deployment accepted, waiting to start.
+              Deployment accepted. It starts right away, or waits its turn if another deploy is
+              already running for this project (per-project FIFO).
             </Text>
           </Timeline.Item>
           <Timeline.Item title="running">

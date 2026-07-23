@@ -93,11 +93,13 @@ and **spec reference**. Legend: ✅ done · 🔜 next · ⬜ todo · 🔒 blocke
 | ID | Task | Priority | Deliverable / Notes | Spec |
 |----|------|:----:|---|---|
 | **T5.1** | ~~Rollback: run hooks + health-check~~ | ✅ Resolved by design | **Superseded by Phase 6 (§21).** Decision 2026-07-22: manual rollback stays code-only (§21.3); post-rollback health moves to continuous monitoring (T6.1); auto-rollback becomes opt-in single-target-or-stay (T6.2). | §8, §21 |
-| **T5.2** | Concurrent deploy → `409` | 🟡 Med | Detect an existing deploy lock **at request time** and return `409 Conflict` synchronously, instead of failing the loser asynchronously. | §6, §20.2 |
-| **T5.3** | Strengthen pipeline "Validate" (step 9) | 🟡 Med | Verify `public/index.php` (Laravel) / `index.html` (static) exist, not just that the docroot is a directory. | §6, §20.2 |
-| **T5.4** | CI read-scope for projects/releases | 🟢 Low | Decide: expose `GET /projects` + `/projects/{slug}/releases` to read-scope API keys, or formally drop them from the CI contract (currently admin-session only). | §7, §20.1 |
-| **T5.5** | Deployment logs endpoint | 🟢 Low | Either implement `GET /deployments/{id}/logs` or keep logs in `steps[]` and remove the endpoint from the contract permanently (already removed from API.md). | §7, §20.1 |
-| **T5.6** | Publish `@cporter/mcp` | 🟢 Low | Decide whether to publish MCP to npm; if yes, add it to `publish.yml` (after SDK) + RELEASING.md "What ships". | §18, §20.6 |
+| **T5.2** | Concurrent deploy → `409` | ✅→♻️ | Shipped as request-time `409`, then **superseded by Phase 7** (per-project FIFO backlog): deploys now **queue** instead of reject. The `guardNoConcurrentDeploy` mechanism lives on, narrowed to guard **rollback/activate** against an actively-running deploy only. | §6, §20.2, §22 |
+| **T5.3** | Strengthen pipeline "Validate" (step 9) | ✅ | `DeployEngine::validateStructure` now verifies the type's entrypoint exists in the docroot (Laravel/PHP/WordPress → `index.php`; static → `index.html`/`.htm`; Node exempt), not just that the docroot is a directory. Mispackaged artifacts fail before going live. Test in DeployPipelineTest. | §6, §20.2 |
+| **T5.4** | CI read-scope for projects/releases | ✅ | **Decision: expose only `/projects/{slug}/releases`** (dual-auth via new `read.session_or_apikey` middleware — read-scope API key or admin session; project-scoped keys limited to their own project). `GET /projects` (list) stays admin-session-only. `ReleaseController::index` gains the project-scope guard; tests in DeployPipelineTest. Docs: API.md §4, SPEC §7/§20.1. | §7, §20.1 |
+| **T5.5** | Deployment logs endpoint | ✅ | **Dropped from the contract by decision** — logs live in `steps[]` (returned by `GET …/deployments/{id}`). Removed the `/logs` row from SPEC §7; §20.1 marked resolved; API.md already had no such endpoint. | §7, §20.1 |
+| **T5.6** | Publish `@cporter/mcp` | ✅ | **Decision: keep repo-only** — not published to npm. Run from a local build/source; `publish.yml` ships sdk + cli only. RELEASING.md + SPEC §20.6 record the decision and how to revisit it. | §18, §20.6 |
+
+**Milestone M5:** ✅ ACHIEVED (2026-07-23) — all hardening/known-gap items closed: T5.1 resolved by design (Phase 6), T5.2/T5.3 shipped with tests, T5.4/T5.5/T5.6 resolved by decision. §20 backlog cleared.
 
 ---
 
@@ -114,6 +116,21 @@ and **spec reference**. Legend: ✅ done · 🔜 next · ⬜ todo · 🔒 blocke
 | **T6.4** | Releases tab UX | ✅ | `active` → static **Live** badge (no self-targeting button); `superseded` → **Rollback** action + code-only confirm copy. Intro clarifies "code version applied" vs "available to roll back to". | §21.5 |
 
 **Milestone M6:** ✅ ACHIEVED — rollback is an explicit, opt-in policy; project health is a persisted, continuously-monitored signal read from one source; retention never blocks the operator.
+
+---
+
+## Phase 7 — Deploy concurrency: per-project FIFO backlog + multi-worker (v1.2)
+
+> Decided 2026-07-23 ([SPEC §22](docs/SPEC.md#22-deploy-concurrency--per-project-fifo-backlog--multi-worker-planned)).
+> Replaces T5.2's `409`-reject: a concurrent deploy now **queues** and runs after, in order; different projects run independently.
+
+| ID | Task | Status | Deliverable / Notes | Spec |
+|----|------|:----:|---|---|
+| **T7.1** | Per-project FIFO backlog | ✅ | `App\Domain\Deploy\DeployDispatcher`: `claimNextFor(Project)` (per-project `Cache::lock` + oldest-`queued` conditional-UPDATE CAS → dispatch) and `dispatchPending()` (drain idle projects). Deploy request drops the `409`, creates `Deployment{queued}`, and "kicks" the dispatcher (idle → runs now / inline under sync; busy → parked). `Project::activeDeployment()` (running/hooks_pending) is the precheck. Backlog drained at the tail of `cporter:run-jobs` + `cporter:housekeep` (self-heal); thin `cporter:dispatch-deploys` for tests/ops. Tests in DeployBacklogTest. | §22.1 |
+| **T7.2** | Multi-worker-safe execution | ✅ | Claim is atomic across requests + workers (per-project cache lock + affected-rows CAS); `DeployEngine::deploy()` early-returns on a terminal row (double-delivery guard); `config/queue.php` `retry_after` 90→660 (> job timeout 600) so the DB queue can't re-reserve a long deploy. cPanel stays single-worker (cooperative); Docker/VPS run N `queue:work` for true parallelism — documented in DEPLOYMENT-CPANEL.md §4. | §22.2 |
+| **T7.3** | Backlog recovery + rollback interaction | ✅ | Housekeep reaps stuck in-flight → releases lock → `dispatchPending()` (backlog never stranded); no timer-based `queued` reaper. Manual rollback/activate `409` narrowed to an **actively running** deploy — a queued backlog doesn't block rollback. Tests in RollbackTest + DeployBacklogTest. | §22.3, §22.4 |
+
+**Milestone M7:** ✅ ACHIEVED (2026-07-23) — deploys queue per-project (FIFO) instead of being rejected; the claim is safe under N workers; cPanel default unchanged, Docker/VPS can deploy projects in parallel.
 
 ---
 

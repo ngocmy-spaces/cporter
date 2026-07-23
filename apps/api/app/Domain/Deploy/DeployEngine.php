@@ -7,6 +7,7 @@ use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Deploy\PostDeploy\PostDeployRunner;
 use App\Enums\DeploymentStatus;
 use App\Enums\ProjectHealth;
+use App\Enums\ProjectType;
 use App\Enums\ReleaseState;
 use App\Enums\RollbackTrigger;
 use App\Models\Artifact;
@@ -43,6 +44,12 @@ class DeployEngine
 
     public function deploy(Deployment $deployment): Deployment
     {
+        // Defence-in-depth against a job being delivered twice (e.g. a DB-queue re-reservation):
+        // a deployment the dispatcher already claimed + ran to a terminal state must never re-run.
+        if ($deployment->status->isTerminal()) {
+            return $deployment;
+        }
+
         [$project, $release, $artifact] = $this->resolve($deployment);
 
         $deployment->forceFill([
@@ -317,6 +324,43 @@ class DeployEngine
         if (! is_dir($docroot)) {
             throw new DeployException('Docroot not found in release: '.($sub !== '' ? $sub : '.'));
         }
+
+        // Beyond "the docroot exists", verify the type's entrypoint file is actually present, so a
+        // mispackaged artifact (wrong docroot subpath, missing build output) fails validation before
+        // it goes live instead of serving a blank 403/404 (docs/SPEC.md §6, §20.2).
+        $entrypoints = $this->expectedEntrypoints($project->type);
+        if ($entrypoints === []) {
+            return;
+        }
+
+        foreach ($entrypoints as $file) {
+            if (is_file($docroot.'/'.$file)) {
+                return;
+            }
+        }
+
+        $prefix = $sub !== '' ? $sub.'/' : '';
+        throw new DeployException(
+            'Docroot is missing its entrypoint ('
+            .implode(' or ', array_map(fn (string $f): string => $prefix.$f, $entrypoints))
+            .'). Check the artifact contents and the project docroot subpath.'
+        );
+    }
+
+    /**
+     * Candidate entrypoint filenames a valid docroot must contain, by project type (docs/SPEC.md §6).
+     * Node apps are served by a long-running process rather than a static docroot file, so they are
+     * exempt (an empty list skips the entrypoint check).
+     *
+     * @return list<string>
+     */
+    private function expectedEntrypoints(ProjectType $type): array
+    {
+        return match ($type) {
+            ProjectType::Laravel, ProjectType::Php, ProjectType::WordPress => ['index.php'],
+            ProjectType::StaticSite => ['index.html', 'index.htm'],
+            ProjectType::Node => [],
+        };
     }
 
     /**

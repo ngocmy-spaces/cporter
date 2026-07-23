@@ -68,6 +68,7 @@ Create + run a deployment from a **single-request** upload.
 - **Returns:** `202 Accepted` with `{ "data": <Deployment> }`. Poll the deployment for progress.
   > ⚠️ No `Location` header is set on the 202 (SPEC §7 mentions one; not implemented). Poll via the id in `data`.
   > A **disabled** project (`status: disabled`) rejects new deploys with `409 Conflict` (also on the chunked `uploads` init/complete).
+  > If another deploy is already in progress for the project, this one is **accepted and queued** (`status: queued`) and runs when the project frees — see §7.
 
 ### Chunked upload — scope: `deploy`
 For artifacts larger than a single request. Three steps, **all project-nested**:
@@ -82,6 +83,9 @@ For artifacts larger than a single request. Three steps, **all project-nested**:
 ### `GET /projects/{slug}/deployments/{id}`  — scope: `read`
 Poll status + step timeline of one deployment. Returns `{ "data": <Deployment> }` (includes `steps[]`).
 Logs are delivered **inside `steps[]`** — there is no separate `/logs` endpoint (see §8).
+
+### `GET /projects/{slug}/releases`  — scope: `read` (or admin session)
+List the project's re-activatable releases (live + prior, still on disk), newest first, bounded by `keep_releases`. Dual-auth (T5.4): reachable with a **read-scope API key** or the **admin session**; a project-scoped key sees only its own project (else `403`). Returns `{ "data": [<Release>] }`.
 
 ### `POST /projects/{slug}/rollback`  — scope: `rollback`
 Roll the project back. Body: `{ "release_id": <int> }` (optional — omit to roll back to the previous release; the SDK/MCP option `releaseId` maps to this snake_case wire field).
@@ -236,10 +240,15 @@ commit SHA.
 
 ## 7. Concurrency
 
-Deploys are serialized per project by a filesystem lock (`deploy.lock`, `O_EXCL` + TTL steal).
-> ⚠️ The lock is acquired **inside** the async deploy job, *after* upload. A second concurrent deploy
-> therefore currently **fails asynchronously** (recorded as a failed deployment) rather than returning a
-> synchronous `409 Conflict` as SPEC §6 envisioned. Treat a lock-conflict as a failed deployment. (Backlog: SPEC §20.)
+Deploys are **serialized per project as a FIFO backlog** (SPEC §22). A project runs at most one deploy at a
+time; a deploy requested while another is in progress for the same project is **accepted and queued**
+(returned with `status: queued`) and starts automatically, oldest-first, once the project is free — it is
+**not** rejected. Different projects are independent and can run concurrently. Poll the returned deployment
+for progress (`queued → running → …`).
+
+The per-project filesystem lock (`deploy.lock`, `O_EXCL` + TTL steal) remains the in-pipeline mutex. Manual
+`POST …/rollback` and release-activate return `409 Conflict` only while a deploy is **actively running**
+(`running`/`hooks_pending`) for that project — a purely-queued backlog does not block a rollback.
 
 ## 8. The `Deployment` object
 

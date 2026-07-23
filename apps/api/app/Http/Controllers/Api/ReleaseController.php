@@ -26,9 +26,16 @@ class ReleaseController extends Controller
      * in-progress releases are omitted — they can't be rolled back to, so listing them only offers
      * dead "Activate" buttons. Full history (including these) lives in the Deployments view. The
      * result is naturally bounded by keep_releases (docs/SPEC.md §6, §8).
+     *
+     * Readable by the admin session OR a read-scope API key (T5.4); a project-scoped key may only
+     * list its own project's releases.
      */
-    public function index(Project $project, ReleasePruner $pruner): JsonResponse
+    public function index(Request $request, Project $project, ReleasePruner $pruner): JsonResponse
     {
+        if ($denied = $this->guardApiKeyProjectScope($request, $project)) {
+            return $denied;
+        }
+
         // Self-heal any superseded rows whose directory is already gone (e.g. pruned before this
         // bookkeeping existed) so the list never offers a dead "Activate".
         $pruner->reconcile($project);
@@ -46,6 +53,10 @@ class ReleaseController extends Controller
     public function activate(Request $request, Release $release): JsonResponse
     {
         $project = $release->project;
+
+        if ($conflict = $this->guardNoConcurrentDeploy($project)) {
+            return $conflict;
+        }
 
         try {
             $deployment = $this->rollback->rollback(
