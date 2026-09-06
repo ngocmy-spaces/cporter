@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Adapters\Storage\StorageAdapter;
 use App\Domain\Audit\AuditLogger;
 use App\Domain\Deploy\EnvFileRenderer;
+use App\Domain\Deploy\HookGuard;
 use App\Domain\Deploy\ReleasePruner;
 use App\Domain\Storage\PathJail;
 use App\Enums\ProjectStatus;
@@ -559,6 +560,12 @@ class ProjectController extends Controller
                     }
                     if (is_string($cmd) && strlen($cmd) > 1000) {
                         $fail("Each command in hooks.{$stage} must be at most 1000 characters.");
+
+                        break;
+                    }
+                    // Schema-destroying commands are refused here AND before execution (HookGuard).
+                    if (is_string($cmd) && ($blocked = HookGuard::blocked($cmd)) !== null) {
+                        $fail("hooks.{$stage}: ".HookGuard::reason($blocked));
 
                         break;
                     }

@@ -360,6 +360,10 @@ Web request (deploy Laravel)                 Standing cron (every ~1 minute)
   every minute. Where cPanel **caps cron at 5 minutes** (common), run `cporter:work` instead — it loops in-process
   for one cron cycle (finalize + queue + housekeep every ~12s) so latency stays ~seconds rather than ~5 minutes (§10).
   For apps **with no hooks** (static/WP/PHP) → deploy is **instant, synchronous**, never touching cron.
+- **Environment:** the hook's child process runs with cPorter's own environment **stripped** — only an
+  allow-list (PATH/HOME/locale + tool vars) is inherited, so the target app resolves its config from its
+  own `shared/.env`. See §23; this is not optional bookkeeping, it is what stops a target app's `migrate`
+  hook from running against cPorter's database.
 
 ### 9.2 The drivers (in priority order on this host)
 
@@ -654,6 +658,7 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 | D | No shell-jobs table | Hooks for Laravel run **inline via `proc_open`** inside the cron `run-jobs` finalize step, not as individually enqueued shell-command jobs. Simpler; works because CLI/cron PHP allows `proc_open`. |
 | D | Driver matrix collapsed | Only `ProcessCommandRunner` (proc_open) is wired. `manual` = "shell unavailable" message. `command_driver` config is **informational only**; **no SSH driver**. |
 | D | No `/cron/tick` HTTP endpoint (§10) | One cPanel cron runs `php artisan schedule:run` (shell context), which drives `cporter:run-jobs` + `queue:work` + `cporter:housekeep`. Hosts capped at a 5-minute cron cadence instead run `cporter:work`, an in-process loop wrapping the same three commands to keep latency low (§10.B). The `cron_token` config is currently **unused**. (Arguably better — shell context isn't blocked by `disable_functions`.) |
+| C | Hook environment | Hooks used to inherit cPorter's whole environment (incl. `DB_*`, `APP_KEY`). Now allow-listed + schema-destroying commands are refused — §23. |
 
 ### 20.5 Domain model (§5)
 | Kind | Item | Reality |
@@ -765,3 +770,55 @@ The FE calls the same `/api/v1` API (using a session or an admin token). Realtim
 ### 22.4 Rollback interaction
 - Manual rollback/activate keep a `409` guard, now narrowed to an **actively running** deploy (`running`/`hooks_pending`)
   — a purely-`queued` backlog does not block an operator's rollback (§8, §20.2).
+
+---
+
+## 23. Hook execution environment (v1.3 — implemented)
+
+> Decided 2026-09-06, after an incident: a managed project's `pre_activate` hook
+> (`php artisan migrate`) ran its migrations against **cPorter's own database** and destroyed it. The
+> project's `.env` was correct; it was never consulted.
+
+### 23.1 Root cause
+
+1. cPorter's cron worker boots Laravel, whose **putenv adapter is on by default**, so cPorter's own
+   `.env` (`DB_*`, `APP_KEY`, `CACHE_STORE`, `CPORTER_*`…) lands in the real process environment.
+   (Only when cPorter's config is *not* cached — `LoadEnvironmentVariables` returns early otherwise.)
+2. Hooks were run through `Process::fromShellCommandline(..., $env = null)`, and Symfony **always**
+   merges the parent environment into the child (7.x removed the inheritance switch).
+3. The target app boots its own Laravel; phpdotenv is **immutable** — *"Don't overwrite existing
+   environment variables"* — so every variable it shares a name with cPorter (i.e. every standard
+   Laravel key) resolved to **cPorter's** value, and its own `.env` was ignored for those keys.
+4. `artisan migrate` therefore ran the target's migration files against cPorter's connection. A
+   `migrate:fresh` in that position drops every cPorter table.
+
+The target app is only immune if that release already has a cached config — which a freshly extracted
+release never does, and `config:cache` normally runs *after* `migrate`. So this affected **every**
+Laravel deploy with hooks, not an edge case.
+
+### 23.2 Resolution
+
+- **Allow-list isolation** in `ProcessCommandRunner`: every inherited variable not in
+  `cporter.hooks.env_passthrough` is mapped to `false`, which removes it from the child. Default list
+  is OS/tooling only (`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TZ`, `TMPDIR`,
+  `TERM`, `SSH_AUTH_SOCK`, `COMPOSER_*`, `NVM_DIR`, `NODE_PATH`, `NPM_CONFIG_CACHE`, `npm_config_*`);
+  a trailing `*` is a prefix match. Override with `CPORTER_HOOK_ENV_PASSTHROUGH` when a hook needs
+  something else from the cron shell. An empty value falls back to the default (an empty passthrough
+  would strip `PATH` and break every hook). Caller-supplied `$env` still wins over the isolation map.
+  A deny-list was rejected: it silently misses keys added later.
+- cPorter does **not** inject the target's env vars — with the collision gone the target reads its own
+  `.env`, so cPorter never has to hold another app's secrets.
+- **`HookGuard`**: commands in `cporter.hooks.blocked_commands` (default `migrate:fresh`,
+  `migrate:reset`, `migrate:refresh`, `db:wipe`) are refused at save time *and* re-checked immediately
+  before execution, so hooks stored before this change are caught too. Whole-token match; empty list
+  disables it. Rationale: a hook runs unattended on every release — dropping the shipped app's schema
+  is never the intent, and this is defence-in-depth for the isolation above.
+
+### 23.3 Notes
+
+- `CapabilityProbe::binariesViaShell()` shares the runner. `PATH` is allow-listed, so `command -v`
+  still resolves exactly what a hook would see (§9.3 holds).
+- Isolation also stops `CPORTER_CRON_TOKEN` / `CPORTER_WEBHOOK_SECRET` / `APP_KEY` leaking into
+  operator-authored hook commands — a secondary security win (§12).
+- Operator-side stopgap for an unpatched install: prefix the hook with
+  `env -u DB_DATABASE -u DB_USERNAME -u DB_PASSWORD -u APP_KEY …`.

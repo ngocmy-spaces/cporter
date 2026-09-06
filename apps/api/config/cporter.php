@@ -57,6 +57,30 @@ return [
         PruneArtifactsTask::class,
     ],
 
+    // Target-app hook execution (docs/SPEC.md §9, §23).
+    'hooks' => [
+        // Environment variables of the cPorter process allowed through to a hook's child process;
+        // every other inherited variable is REMOVED. A hook runs inside the TARGET app, which must
+        // resolve its config from its OWN .env — and phpdotenv never overwrites a variable that is
+        // already set in the environment, so a leaked DB_DATABASE/APP_KEY silently wins over the
+        // target's file (this once pointed a target app's `artisan migrate` at cPorter's database).
+        // A trailing `*` matches a prefix. An empty value falls back to this default on purpose:
+        // an empty passthrough would strip PATH and break every hook.
+        'env_passthrough' => array_values(array_filter(array_map('trim', explode(',', (string) (
+            env('CPORTER_HOOK_ENV_PASSTHROUGH') ?: 'PATH,HOME,USER,LOGNAME,SHELL,LANG,LC_*,TZ,TMPDIR,TERM,'
+                .'SSH_AUTH_SOCK,COMPOSER_HOME,COMPOSER_CACHE_DIR,NVM_DIR,NODE_PATH,NPM_CONFIG_CACHE,npm_config_*'
+        ))))),
+
+        // Hook commands refused both at save time and immediately before execution: each drops or
+        // rewrites the target app's schema, which a hook — running unattended on every release —
+        // must never do. Matched as a whole token anywhere in the command. Set the env var to an
+        // empty value to disable the guard entirely.
+        'blocked_commands' => array_values(array_filter(array_map('trim', explode(',', (string) env(
+            'CPORTER_BLOCKED_HOOK_COMMANDS',
+            'migrate:fresh,migrate:reset,migrate:refresh,db:wipe'
+        ))))),
+    ],
+
     // Health check defaults.
     'health_check' => [
         // Deploy-time activation gate: poll (with retries) up to this many seconds for a 2xx.
