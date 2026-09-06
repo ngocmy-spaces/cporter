@@ -199,6 +199,11 @@ For each site cPorter will deploy, set that domain's **Document Root**:
      by the scheduler/worker, no extra cron needed), so it reflects the exact PATH your hooks run with;
      verify it points at a CLI build, e.g. `/usr/local/bin/php -v` should say `(cli)`, not `(cgi-fcgi)`)
    - `health_check_url=https://<site>.domain/up` (Laravel has `/up`; static: any 200 URL)
+   - Hooks run with cPorter's own environment **stripped** (only `PATH`/`HOME`/locale/tooling vars are
+     inherited), so the target app reads its **own** `shared/.env` — see [SPEC §23](SPEC.md#23-hook-execution-environment-v13--implemented).
+     If a hook needs an extra variable from the cron shell, list it in `CPORTER_HOOK_ENV_PASSTHROUGH`.
+     Schema-destroying commands (`migrate:fresh`, `migrate:reset`, `migrate:refresh`, `db:wipe`) are
+     rejected in hooks — run those by hand over Terminal.
 2. **API Keys ▸ New key** (scope `deploy`, `read`, optionally `rollback`) → copy the token.
 3. Deploy from CI or Postman:
    - **GitHub Actions**: use the cPorter Action (`uses: ngocmy-spaces/cporter/packages/github-action@v1`),
@@ -248,4 +253,6 @@ down until rollback). Until you set that up, repeat §2–§3 with a new `releas
 | Laravel hooks "run manually" | CLI `proc_open` disabled even in cron → run the hook commands over Terminal, or ask host to allow it. |
 | `base_path must be within an allowed base path` | Add the site's parent to `CPORTER_ALLOWED_BASE_PATHS`. |
 | Symlink swap fails | Host disallows symlinks → cPorter falls back to copy-swap automatically; ensure disk space. |
+| Hook says a config/env value is missing or wrong | The hook only inherits allow-listed env vars; the app must read its own `shared/.env`. Add the variable to `CPORTER_HOOK_ENV_PASSTHROUGH` only if it must come from the cron shell. |
+| Hook rejected: "drops or rewrites the target app's schema" | `migrate:fresh`/`db:wipe`-class commands are blocked in hooks by design. Run manually, or adjust `CPORTER_BLOCKED_HOOK_COMMANDS`. |
 | Artifact upload rejected | Raise `upload_max_filesize`/`post_max_size` (MultiPHP INI Editor) or use chunked upload. |

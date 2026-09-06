@@ -221,6 +221,15 @@ class DeployEngine
         }
 
         foreach ($hooks as $hook) {
+            // Second line of defence: a hook stored before the guard existed (or written straight
+            // to the DB) is refused here rather than run (docs/SPEC.md §23).
+            if (($blocked = HookGuard::blocked($hook)) !== null) {
+                $message = HookGuard::reason($blocked);
+                $steps->record("hook:{$phase}:{$hook}", false, $message);
+
+                throw new DeployException($message);
+            }
+
             $steps->run("hook:{$phase}:{$hook}", function () use ($hook, $release): ?string {
                 $result = $this->commands->run($hook, $release->path, [], 600);
                 if (! $result->ok()) {
