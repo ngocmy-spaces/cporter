@@ -1,0 +1,4 @@
+# Normalize line endings. Shell scripts must stay LF so they run inside Linux
+# containers even when the repo is checked out on Windows (CRLF breaks the shebang).
+* text=auto eol=lf
+*.sh text eol=lf
