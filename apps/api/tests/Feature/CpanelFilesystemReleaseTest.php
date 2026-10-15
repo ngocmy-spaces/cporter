@@ -2,6 +2,8 @@
 
 use App\Adapters\Storage\CpanelFilesystemAdapter;
 use App\Domain\Storage\PathJail;
+use App\Domain\Storage\PathOutsideJailException;
+use App\Domain\Storage\StorageException;
 use Illuminate\Support\Facades\File;
 
 beforeEach(function () {
@@ -89,7 +91,7 @@ it('refuses to create an empty shared file when the artifact ships none', functi
     $r1 = ($this->mkRelease)('r1');
 
     expect(fn () => $this->adapter->linkShared($r1, $shared, [['path' => 'config/app.env', 'type' => 'file']]))
-        ->toThrow(App\Domain\Storage\StorageException::class);
+        ->toThrow(StorageException::class);
 
     expect(file_exists($shared.'/config/app.env'))->toBeFalse()
         ->and(is_dir($shared.'/config'))->toBeFalse(); // no stray parent dir on the error path
@@ -146,9 +148,68 @@ it('refuses to activate a target outside the jail', function () {
     try {
         $this->adapter->activate($outside, $this->root.'/current');
         expect(false)->toBeTrue('expected a jail violation');
-    } catch (App\Domain\Storage\PathOutsideJailException) {
+    } catch (PathOutsideJailException) {
         expect(true)->toBeTrue();
     } finally {
         File::deleteDirectory($outside);
     }
+});
+
+it('converts a real current directory (copy-swap / cPanel-created) into a symlink on activate', function () {
+    File::makeDirectory($this->root.'/current/public', 0777, true, true);
+    File::put($this->root.'/current/public/index.html', 'old copy');
+
+    $r1 = ($this->mkRelease)('r1', body: 'new');
+    $this->adapter->activate($r1, $this->root.'/current');
+
+    expect(is_link($this->root.'/current'))->toBeTrue()
+        ->and($this->adapter->currentTarget($this->root))->toBe(realpath($r1))
+        ->and(file_get_contents($this->root.'/current/index.html'))->toBe('new')
+        ->and(glob($this->root.'/current.*'))->toBe([]); // backup removed, no tmp left behind
+});
+
+it('removes the partial staging copy and keeps the OS reason when copy-swap fails', function () {
+    if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+        $this->markTestSkipped('root can read mode-000 files');
+    }
+
+    $r1 = ($this->mkRelease)('r1');
+    File::put($r1.'/secret.txt', 'x');
+    chmod($r1.'/secret.txt', 0000);
+
+    $copySwap = new ReflectionMethod($this->adapter, 'copySwap');
+
+    try {
+        $copySwap->invoke($this->adapter, $r1, $this->root.'/current');
+        expect(false)->toBeTrue('expected copy-swap to fail');
+    } catch (StorageException $e) {
+        expect($e->getMessage())->toContain('secret.txt: ')
+            ->and($e->getMessage())->toContain('Permission denied');
+    } finally {
+        chmod($r1.'/secret.txt', 0644);
+    }
+
+    expect(glob($this->root.'/current*'))->toBe([]);
+});
+
+it('preflight removes an empty placeholder current directory so the first deploy can symlink', function () {
+    File::makeDirectory($this->root.'/current/public/.well-known', 0777, true, true);
+
+    $checks = collect($this->adapter->preflight($this->root)['checks'])->keyBy('key');
+
+    expect($checks['symlink']['status'])->toBe('ok')
+        ->and($checks['current']['status'])->toBe('pending')
+        ->and($checks['current']['detail'])->toContain('Removed an empty placeholder')
+        ->and(file_exists($this->root.'/current'))->toBeFalse();
+});
+
+it('preflight warns about, but never touches, a current directory with content', function () {
+    File::makeDirectory($this->root.'/current/public', 0777, true, true);
+    File::put($this->root.'/current/public/index.php', 'live site');
+
+    $checks = collect($this->adapter->preflight($this->root)['checks'])->keyBy('key');
+
+    expect($checks['current']['status'])->toBe('warning')
+        ->and($checks['current']['detail'])->toContain('next deploy converts it')
+        ->and(file_get_contents($this->root.'/current/public/index.php'))->toBe('live site');
 });

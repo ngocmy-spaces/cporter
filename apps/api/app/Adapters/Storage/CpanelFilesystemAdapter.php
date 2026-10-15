@@ -535,10 +535,12 @@ class CpanelFilesystemAdapter implements StorageAdapter
             $this->ensureDirCheck('base_path', $base, 'Project base directory'),
             $this->ensureDirCheck('releases', rtrim($base, '/').'/releases', 'releases/ (versioned release directories)'),
             $this->ensureDirCheck('shared', rtrim($base, '/').'/shared', 'shared/ (data persisted across releases)'),
-            $this->probeSymlink($base),
-            $this->currentCheck($projectBasePath),
-            $this->sharedFilesCheck(rtrim($base, '/').'/shared', $sharedPaths),
         ];
+        // Probe only after the base exists, then let the `current` check act on the result.
+        $symlinkCheck = $this->probeSymlink($base);
+        $checks[] = $symlinkCheck;
+        $checks[] = $this->currentCheck($projectBasePath, $symlinkCheck['status'] === 'ok');
+        $checks[] = $this->sharedFilesCheck(rtrim($base, '/').'/shared', $sharedPaths);
 
         $ok = array_filter($checks, fn (array $c) => $c['status'] === 'error') === [];
 
@@ -584,8 +586,14 @@ class CpanelFilesystemAdapter implements StorageAdapter
             : ['key' => 'symlink', 'label' => $label, 'status' => 'warning', 'detail' => 'Could not create a symlink — deploys will use the slower, non-atomic copy-swap activation.'];
     }
 
-    /** Inspect the `current` symlink without creating it (nothing to point at pre-deploy). */
-    private function currentCheck(string $projectBasePath): array
+    /**
+     * Inspect the `current` symlink without creating it (nothing to point at pre-deploy).
+     *
+     * A real directory at `current` forces copy-swap even on hosts with working symlinks
+     * (usually cPanel pre-creating the document root). An empty placeholder is removed here;
+     * one with content is left alone and converted by the next activation.
+     */
+    private function currentCheck(string $projectBasePath, bool $symlinksWork): array
     {
         $label = 'current symlink';
         $current = $this->jailedLeaf($this->trailingChild($projectBasePath, 'current'));
@@ -600,7 +608,20 @@ class CpanelFilesystemAdapter implements StorageAdapter
         }
 
         if (is_dir($current)) {
-            return ['key' => 'current', 'label' => $label, 'status' => 'ok', 'detail' => 'Present as a directory (copy-swap mode).'];
+            if (! $symlinksWork) {
+                return ['key' => 'current', 'label' => $label, 'status' => 'ok', 'detail' => 'Present as a directory (copy-swap mode — this host does not support symlinks).'];
+            }
+
+            if ($this->isEmptyTree($current)) {
+                $this->deleteRecursive($current);
+                if (! file_exists($current)) {
+                    return ['key' => 'current', 'label' => $label, 'status' => 'pending', 'detail' => 'Removed an empty placeholder directory (likely pre-created by cPanel for the document root). The next deploy creates the symlink.'];
+                }
+
+                return ['key' => 'current', 'label' => $label, 'status' => 'warning', 'detail' => "An empty placeholder directory blocks the symlink and could not be removed: {$current}"];
+            }
+
+            return ['key' => 'current', 'label' => $label, 'status' => 'warning', 'detail' => 'Present as a real directory, so deploys fall back to the slower copy-swap. Symlinks work on this host — the next deploy converts it to a symlink automatically.'];
         }
 
         return ['key' => 'current', 'label' => $label, 'status' => 'pending', 'detail' => 'Not created yet — cPorter creates it on the first successful deploy. Do not create it by hand.'];
@@ -737,10 +758,31 @@ class CpanelFilesystemAdapter implements StorageAdapter
 
             return false;
         }
+
+        // rename() cannot replace a real directory with a symlink (EISDIR). Migrate a copy-swap
+        // or cPanel-created `current` by moving it aside first — the same two-rename window
+        // copySwap() already accepts — so the host stops paying for a full copy per deploy.
+        $backup = null;
+        if (is_dir($link) && ! is_link($link)) {
+            $backup = $link.'.old-'.bin2hex(random_bytes(4));
+            if (! @rename($link, $backup)) {
+                @unlink($tmp);
+
+                return false;
+            }
+        }
+
         if (! @rename($tmp, $link)) { // atomic replace of the existing symlink
+            if ($backup !== null) {
+                @rename($backup, $link); // restore
+            }
             @unlink($tmp);
 
             return false;
+        }
+
+        if ($backup !== null) {
+            $this->deleteRecursive($backup);
         }
 
         return true;
@@ -749,7 +791,12 @@ class CpanelFilesystemAdapter implements StorageAdapter
     private function copySwap(string $target, string $link): void
     {
         $staged = $link.'.new-'.bin2hex(random_bytes(4));
-        $this->copyDir($target, $staged);
+        try {
+            $this->copyDir($target, $staged);
+        } catch (StorageException $e) {
+            $this->deleteRecursive($staged); // never leave a partial copy eating the quota
+            throw $e;
+        }
 
         $backup = null;
         if (file_exists($link) || is_link($link)) {
@@ -790,10 +837,41 @@ class CpanelFilesystemAdapter implements StorageAdapter
                 @symlink((string) readlink($from), $to);
             } elseif (is_dir($from)) {
                 $this->copyDir($from, $to);
-            } elseif (! @copy($from, $to)) {
-                throw new StorageException("copy: failed to copy {$from}");
+            } else {
+                // Capture the warning locally: under Laravel's error handler error_get_last()
+                // is not updated for suppressed warnings, so it would report a stale error.
+                $reason = 'unknown error';
+                set_error_handler(function (int $no, string $message) use (&$reason): bool {
+                    $reason = $message;
+
+                    return true;
+                });
+                try {
+                    $copied = copy($from, $to);
+                } finally {
+                    restore_error_handler();
+                }
+                if (! $copied) {
+                    throw new StorageException("copy: failed to copy {$from}: {$reason}");
+                }
             }
         }
+    }
+
+    /** True if $dir holds nothing but (nested) empty directories. Stops at the first file/link. */
+    private function isEmptyTree(string $dir): bool
+    {
+        foreach (scandir($dir) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $path = $dir.'/'.$entry;
+            if (is_link($path) || ! is_dir($path) || ! $this->isEmptyTree($path)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /** Recursively delete a file/dir. Symlinks are unlinked, never followed. */
