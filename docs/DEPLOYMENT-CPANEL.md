@@ -252,7 +252,9 @@ down until rollback). Until you set that up, repeat §2–§3 with a new `releas
 | Deploy stuck `queued`/`hooks_pending` | The cron (§4) isn't running — verify the cron line + PHP CLI path. |
 | Laravel hooks "run manually" | CLI `proc_open` disabled even in cron → run the hook commands over Terminal, or ask host to allow it. |
 | `base_path must be within an allowed base path` | Add the site's parent to `CPORTER_ALLOWED_BASE_PATHS`. |
-| Symlink swap fails | Host disallows symlinks → cPorter falls back to copy-swap automatically; ensure disk space. |
+| Symlink swap fails | Host disallows symlinks → cPorter falls back to copy-swap automatically; ensure disk space (copy-swap needs ~2× the release size). |
+| `current` is a real directory (cPanel pre-created the docroot, or an older copy-swap deploy) | On a host with working symlinks, preflight removes an *empty* placeholder and warns about one with content; the next deploy converts it to a symlink automatically. |
+| `copy: failed to copy … : <reason>` | Copy-swap failed — the reason is the OS error (e.g. `Disk quota exceeded`). Free space / inodes and redeploy; the partial copy is cleaned up automatically. |
 | Hook says a config/env value is missing or wrong | The hook only inherits allow-listed env vars; the app must read its own `shared/.env`. Add the variable to `CPORTER_HOOK_ENV_PASSTHROUGH` only if it must come from the cron shell. |
 | Hook rejected: "drops or rewrites the target app's schema" | `migrate:fresh`/`db:wipe`-class commands are blocked in hooks by design. Run manually, or adjust `CPORTER_BLOCKED_HOOK_COMMANDS`. |
 | Artifact upload rejected | Raise `upload_max_filesize`/`post_max_size` (MultiPHP INI Editor) or use chunked upload. |
